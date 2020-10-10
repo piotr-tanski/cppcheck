@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -75,6 +75,7 @@ private:
         TEST_CASE(noConstructor7); // ticket #4391
         TEST_CASE(noConstructor8); // ticket #4404
         TEST_CASE(noConstructor9); // ticket #4419
+        TEST_CASE(noConstructor10); // ticket #6614
         TEST_CASE(noConstructor11); // ticket #3552
         TEST_CASE(noConstructor12); // #8951 - member initialization
 
@@ -552,6 +553,27 @@ private:
               "};");
         ASSERT_EQUALS("", errout.str());
     }
+
+    void noConstructor10() {
+        // ticket #6614
+        check("class A : public wxDialog\n"
+              "{\n"
+              "private:\n"
+              "    DECLARE_EVENT_TABLE()\n"
+              "public:\n"
+              "    A(wxWindow *parent,\n"
+              "      wxWindowID id = 1,\n"
+              "      const wxString &title = wxT(""),\n"
+              "      const wxPoint& pos = wxDefaultPosition,\n"
+              "      const wxSize& size = wxDefaultSize,\n"
+              "      long style = wxDIALOG_NO_PARENT | wxMINIMIZE_BOX | wxMAXIMIZE_BOX | wxCLOSE_BOX);\n"
+              "    virtual ~A();\n"
+              "private:\n"
+              "    wxTimer *WxTimer1;\n"
+              "};\n");
+        ASSERT_EQUALS("", errout.str());
+    }
+
 
     void noConstructor11() { // #3552
         check("class Fred { int x; };\n"
@@ -1201,7 +1223,7 @@ private:
               "    Fred() { };\n"
               "    Fred(const Fred &) { };\n"
               "};", true);
-        ASSERT_EQUALS("[test.cpp:7]: (warning, inconclusive) Member variable 'Fred::var' is not initialized in the constructor.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:7]: (warning, inconclusive) Member variable 'Fred::var' is not assigned in the copy constructor. Should it be copied?\n", errout.str());
 
         check("class Fred\n"
               "{\n"
@@ -1213,7 +1235,7 @@ private:
               "};\n"
               "Fred::Fred() { };\n"
               "Fred::Fred(const Fred &) { };\n", true);
-        ASSERT_EQUALS("[test.cpp:10]: (warning, inconclusive) Member variable 'Fred::var' is not initialized in the constructor.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:10]: (warning, inconclusive) Member variable 'Fred::var' is not assigned in the copy constructor. Should it be copied?\n", errout.str());
     }
 
     void initvar_nested_constructor() { // ticket #1375
@@ -1387,8 +1409,8 @@ private:
               "    B(B &&){}\n"
               "    const B& operator=(const B&){return *this;}\n"
               "};", true);
-        ASSERT_EQUALS("[test.cpp:11]: (warning, inconclusive) Member variable 'B::a' is not initialized in the constructor.\n"
-                      "[test.cpp:12]: (warning, inconclusive) Member variable 'B::a' is not initialized in the constructor.\n"
+        ASSERT_EQUALS("[test.cpp:11]: (warning, inconclusive) Member variable 'B::a' is not assigned in the copy constructor. Should it be copied?\n"
+                      "[test.cpp:12]: (warning, inconclusive) Member variable 'B::a' is not assigned in the copy constructor. Should it be copied?\n"
                       "[test.cpp:13]: (warning, inconclusive) Member variable 'B::a' is not assigned a value in 'B::operator='.\n",
                       errout.str());
 
@@ -1488,7 +1510,7 @@ private:
               "    A() {}\n"
               "    A(const A& rhs) {}\n"
               "};", true);
-        ASSERT_EQUALS("[test.cpp:4]: (warning, inconclusive) Member variable 'A::b' is not initialized in the constructor.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:4]: (warning, inconclusive) Member variable 'A::b' is not assigned in the copy constructor. Should it be copied?\n", errout.str());
     }
 
     void initvar_with_member_function_this() {

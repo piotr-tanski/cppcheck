@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,8 +23,6 @@
 #include <QStringList>
 #include <QMetaType>
 #include "errorlogger.h"
-
-class ErrorLine;
 
 /// @addtogroup GUI
 /// @{
@@ -52,7 +50,7 @@ public:
 class QErrorPathItem {
 public:
     QErrorPathItem() : line(0), column(-1) {}
-    explicit QErrorPathItem(const ErrorLogger::ErrorMessage::FileLocation &loc);
+    explicit QErrorPathItem(const ErrorMessage::FileLocation &loc);
     QString file;
     int line;
     int column;
@@ -72,22 +70,25 @@ bool operator==(const QErrorPathItem &i1, const QErrorPathItem &i2);
 class ErrorItem {
 public:
     ErrorItem();
-    explicit ErrorItem(const ErrorLogger::ErrorMessage &errmsg);
+    explicit ErrorItem(const ErrorMessage &errmsg);
 
     /**
     * @brief Convert error item to string.
     * @return Error item as string.
     */
-    QString ToString() const;
+    QString toString() const;
     QString tool() const;
 
     QString file0;
+    QString function;
     QString errorId;
     Severity::SeverityType severity;
+    bool incomplete;
     bool inconclusive;
     QString summary;
     QString message;
     int cwe;
+    unsigned long long hash;
     QList<QErrorPathItem> errorPath;
     QString symbolNames;
 
@@ -112,6 +113,9 @@ public:
     unsigned int line;
     QString file0;
     QString errorId;
+    bool incomplete;
+    int cwe;
+    unsigned long long hash;
     bool inconclusive;
     Severity::SeverityType severity;
     QString summary;

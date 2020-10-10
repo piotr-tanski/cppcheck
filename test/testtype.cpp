@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -250,6 +250,9 @@ private:
 
     void signConversion() {
         check("x = -4 * (unsigned)y;");
+        ASSERT_EQUALS("[test.cpp:1]: (warning) Expression '-4' has a negative value. That is converted to an unsigned value and used in an unsigned calculation.\n", errout.str());
+
+        check("x = (unsigned)y * -4;");
         ASSERT_EQUALS("[test.cpp:1]: (warning) Expression '-4' has a negative value. That is converted to an unsigned value and used in an unsigned calculation.\n", errout.str());
 
         check("unsigned int dostuff(int x) {\n" // x is signed

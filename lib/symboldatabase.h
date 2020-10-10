@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,8 +24,8 @@
 #include "config.h"
 #include "library.h"
 #include "mathlib.h"
-#include "platform.h"
 #include "token.h"
+#include "utils.h"
 
 #include <cstddef>
 #include <list>
@@ -34,6 +34,10 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace cppcheck {
+    class Platform;
+}
 
 class ErrorLogger;
 class Function;
@@ -127,20 +131,13 @@ public:
         return classDef ? classDef->str() : emptyString;
     }
 
-    bool isClassType() const {
-        return classDef && classDef->str() == "class";
-    }
-
-    bool isEnumType() const {
-        return classDef && classDef->str() == "enum";
-    }
+    bool isClassType() const;
+    bool isEnumType() const;
+    bool isStructType() const;
+    bool isUnionType() const;
 
     bool isTypeAlias() const {
         return classDef && classDef->str() == "using";
-    }
-
-    bool isStructType() const {
-        return classDef && classDef->str() == "struct";
     }
 
     const Token *initBaseInfo(const Token *tok, const Token *tok1);
@@ -193,7 +190,9 @@ class CPPCHECKLIB Variable {
         fIsStlString  = (1 << 11),  /** @brief std::string|wstring|basic_string&lt;T&gt;|u16string|u32string */
         fIsFloatType  = (1 << 12),  /** @brief Floating point type */
         fIsVolatile   = (1 << 13),  /** @brief volatile */
-        fIsSmartPointer = (1 << 14)   /** @brief std::shared_ptr|unique_ptr */
+        fIsSmartPointer = (1 << 14),/** @brief std::shared_ptr|unique_ptr */
+        fIsMaybeUnused = (1 << 15), /** @brief marked [[maybe_unused]] */
+        fIsInit       = (1 << 16), /** @brief Is variable initialized in declaration */
     };
 
     /**
@@ -497,6 +496,14 @@ public:
     }
 
     /**
+     * Is variable initialized in its declaration
+     * @return true if variable declaration contains initialization
+     */
+    bool isInit() const {
+        return getFlag(fIsInit);
+    }
+
+    /**
      * Get Type pointer of known type.
      * @return pointer to type if known, NULL if not known
      */
@@ -618,6 +625,10 @@ public:
         return type() && type()->isEnumType();
     }
 
+    bool isMaybeUnused() const {
+        return getFlag(fIsMaybeUnused);
+    }
+
     const ValueType *valueType() const {
         return mValueType;
     }
@@ -733,6 +744,8 @@ public:
     const std::string &name() const {
         return tokenDef->str();
     }
+
+    std::string fullName() const;
 
     nonneg int argCount() const {
         return argumentList.size();
@@ -880,10 +893,13 @@ public:
     const Token *noexceptArg;         ///< noexcept token
     const Token *throwArg;            ///< throw token
     const Token *templateDef;         ///< points to 'template <' before function
+    const Token *functionPointerUsage; ///< function pointer usage
 
     static bool argsMatch(const Scope *scope, const Token *first, const Token *second, const std::string &path, nonneg int path_length);
 
     static bool returnsReference(const Function* function, bool unknown = false);
+
+    static std::vector<const Token*> findReturns(const Function* f);
 
     const Token* returnDefEnd() const {
         if (this->hasTrailingReturnType()) {
@@ -1027,6 +1043,17 @@ public:
         return false;
     }
 
+    static Function* nestedInFunction(const Scope* scope) {
+        while (scope) {
+            if (scope->type == Scope::eFunction)
+                break;
+            scope = scope->nestedIn;
+        }
+        if (!scope)
+            return nullptr;
+        return scope->function;
+    }
+
     bool isClassOrStruct() const {
         return (type == eClass || type == eStruct);
     }
@@ -1131,6 +1158,11 @@ private:
     void findFunctionInBase(const std::string & name, nonneg int args, std::vector<const Function *> & matches) const;
 };
 
+enum class Reference {
+    None,
+    LValue,
+    RValue
+};
 
 /** Value type */
 class CPPCHECKLIB ValueType {
@@ -1140,6 +1172,7 @@ public:
     nonneg int bits;                    ///< bitfield bitcount
     nonneg int pointer;                 ///< 0=>not pointer, 1=>*, 2=>**, 3=>***, etc
     nonneg int constness;               ///< bit 0=data, bit 1=*, bit 2=**
+    Reference reference = Reference::None;///< Is the outermost indirection of this type a reference or rvalue reference or not? pointer=2, Reference=LValue would be a T**&
     const Scope *typeScope;               ///< if the type definition is seen this point out the type scope
     const ::Type *smartPointerType;       ///< Smart pointer type
     const Token* smartPointerTypeToken;   ///< Smart pointer type token
@@ -1301,7 +1334,7 @@ public:
     void validateVariables() const;
 
     /** Set valuetype in provided tokenlist */
-    void setValueTypeInTokenList(bool reportDebugWarnings);
+    void setValueTypeInTokenList(bool reportDebugWarnings, Token *tokens=nullptr);
 
     /**
      * Calculates sizeof value for given type.
@@ -1337,6 +1370,7 @@ private:
     void createSymbolDatabaseEnums();
     void createSymbolDatabaseEscapeFunctions();
     void createSymbolDatabaseIncompleteVars();
+    void createSymbolDatabaseExprIds();
 
     void addClassFunction(Scope **scope, const Token **tok, const Token *argStart);
     Function *addGlobalFunctionDecl(Scope*& scope, const Token* tok, const Token *argStart, const Token* funcStart);

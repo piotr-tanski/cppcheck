@@ -1,5 +1,5 @@
 // Cppcheck - A tool for static C/C++ code analysis
-// Copyright (C) 2007-2019 Cppcheck team.
+// Copyright (C) 2007-2020 Cppcheck team.
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -47,10 +47,14 @@ private:
         TEST_CASE(cxxConstructExpr2);
         TEST_CASE(cxxConstructExpr3);
         TEST_CASE(cxxDeleteExpr);
+        TEST_CASE(cxxDestructorDecl);
         TEST_CASE(cxxForRangeStmt1);
         TEST_CASE(cxxForRangeStmt2);
+        TEST_CASE(cxxFunctionalCastExpr);
         TEST_CASE(cxxMemberCall);
-        TEST_CASE(cxxMethodDecl);
+        TEST_CASE(cxxMethodDecl1);
+        TEST_CASE(cxxMethodDecl2);
+        TEST_CASE(cxxMethodDecl3);
         TEST_CASE(cxxNewExpr);
         TEST_CASE(cxxNullPtrLiteralExpr);
         TEST_CASE(cxxOperatorCallExpr);
@@ -247,7 +251,7 @@ private:
                              "|   | `-ParmVarDecl 0x247c790 <col:25> col:25 'const C<int> &'\n"
                              "|   `-CXXConstructorDecl 0x247c828 <col:25> col:25 implicit constexpr C 'void (C<int> &&)' inline default trivial noexcept-unevaluated 0x247c828\n"
                              "|     `-ParmVarDecl 0x247c960 <col:25> col:25 'C<int> &&'\n";
-        ASSERT_EQUALS("class C { int foo ( ) { return 0 ; } }", parse(clang));
+        ASSERT_EQUALS("class C { int foo ( ) { return 0 ; } default ( ) { } noexcept-unevaluated ( const C<int> & ) ; noexcept-unevaluated ( C<int> && ) ; }", parse(clang));
     }
 
     void conditionalExpr() {
@@ -302,7 +306,7 @@ private:
                              "|     | `-CXXThisExpr 0x428e9c0 <col:17> 'C *' this\n"
                              "|     `-IntegerLiteral 0x428ea10 <col:21> 'int' 0\n"
                              "`-FieldDecl 0x428e958 <col:26, col:30> col:30 referenced x 'int'";
-        ASSERT_EQUALS("void C ( ) { this . x@1 = 0 ; } int x@1", parse(clang));
+        ASSERT_EQUALS("C ( ) { this . x@1 = 0 ; } int x@1", parse(clang));
     }
 
     void cxxConstructExpr1() {
@@ -348,6 +352,13 @@ private:
                              "|     `-ImplicitCastExpr 0x2e0e850 <col:25> 'int *' <LValueToRValue>\n"
                              "|       `-DeclRefExpr 0x2e0e828 <col:25> 'int *' lvalue ParmVar 0x2e0e680 'p' 'int *'";
         ASSERT_EQUALS("void f ( int * p@1 ) { delete p@1 ; }", parse(clang));
+    }
+
+    void cxxDestructorDecl() {
+        const char clang[] = "`-CXXRecordDecl 0x8ecd60 <1.cpp:1:1, line:4:1> line:1:8 struct S definition\n"
+                             "  `-CXXDestructorDecl 0x8ed088 <line:3:3, col:9> col:3 ~S 'void () noexcept'\n"
+                             "    `-CompoundStmt 0x8ed1a8 <col:8, col:9>";
+        ASSERT_EQUALS("struct S\n\n{ ~S ( ) { } }", parse(clang));
     }
 
     void cxxForRangeStmt1() {
@@ -423,6 +434,24 @@ private:
                       parse(clang));
     }
 
+    void cxxFunctionalCastExpr() {
+        const char clang[] = "`-FunctionDecl 0x156fe98 <line:1:1, line:3:1> line:1:5 main 'int (int, char **)'\n"
+                             "  |-ParmVarDecl 0x156fd00 <col:10, col:14> col:14 argc 'int'\n"
+                             "  |-ParmVarDecl 0x156fdb8 <col:20, col:27> col:27 argv 'char **'\n"
+                             "  `-CompoundStmt 0x1596410 <line:2:1, line:2:1>\n"
+                             "    |-DeclStmt 0x15946a8 <line:2:15, line:2:29>\n"
+                             "    | `-VarDecl 0x1570118 <line:2:15, line:2:28> col:11 used setCode 'MyVar<int>':'MyVar<int>' cinit\n"
+                             "    |   `-ExprWithCleanups 0x1594690 <line:2:15, line:3:28> 'MyVar<int>':'MyVar<int>'\n"
+                             "    |     `-CXXConstructExpr 0x1594660 <line:2:15, line:3:28> 'MyVar<int>':'MyVar<int>' 'void (MyVar<int> &&) noexcept' elidable\n"
+                             "    |       `-MaterializeTemporaryExpr 0x1592b68 <line:2:15, line:3:28> 'MyVar<int>':'MyVar<int>' xvalue\n"
+                             "    |         `-CXXFunctionalCastExpr 0x1592b40 <line:2:15, line:3:28> 'MyVar<int>':'MyVar<int>' functional cast to MyVar<int> <ConstructorConversion>\n"
+                             "    |           `-CXXConstructExpr 0x15929f0 <line:2:15, line:3:28> 'MyVar<int>':'MyVar<int>' 'void (int)'\n"
+                             "    |             `-IntegerLiteral 0x1570248 <col:27> 'int' 5\n";
+        ASSERT_EQUALS("int main ( int argc@1 , char ** argv@2 ) {\n"
+                      "MyVar<int> setCode@3 = MyVar<int> ( 5 ) ; }",
+                      parse(clang));
+    }
+
     void cxxMemberCall() {
         const char clang[] = "`-FunctionDecl 0x320dc80 <line:2:1, col:33> col:6 bar 'void ()'\n"
                              "  `-CompoundStmt 0x323bb08 <col:12, col:33>\n"
@@ -435,7 +464,7 @@ private:
         ASSERT_EQUALS("void bar ( ) { C<int> c@1 ( C<int> ( ) ) ; c@1 . foo ( ) ; }", parse(clang));
     }
 
-    void cxxMethodDecl() {
+    void cxxMethodDecl1() {
         const char clang[] = "|-CXXMethodDecl 0x55c786f5ad60 <line:56:5, col:179> col:10 analyzeFile '_Bool (const std::string &, const std::string &, const std::string &, unsigned long long, std::list<ErrorLogger::ErrorMessage> *)'\n"
                              "| |-ParmVarDecl 0x55c786f5a4c8 <col:22, col:41> col:41 buildDir 'const std::string &'\n"
                              "| |-ParmVarDecl 0x55c786f5a580 <col:51, col:70> col:70 sourcefile 'const std::string &'\n"
@@ -444,6 +473,34 @@ private:
                              "| |-ParmVarDecl 0x55c786f5ac00 <col:135, col:173> col:173 errors 'std::list<ErrorLogger::ErrorMessage> *'\n"
                              "  `-CompoundStmt 0x0 <>";
         ASSERT_EQUALS("_Bool analyzeFile ( const std::string & buildDir@1 , const std::string & sourcefile@2 , const std::string & cfg@3 , unsigned long long checksum@4 , std::list<ErrorLogger::ErrorMessage> * errors@5 ) { }", parse(clang));
+    }
+
+    void cxxMethodDecl2() { // "unexpanded" template method
+        const char clang[] = "`-CXXMethodDecl 0x220ecb0 parent 0x21e4c28 prev 0x21e5338 <line:11:1, line:18:1> line:14:1 find 'const typename char_traits<_CharT>::char_type *(const char_traits::char_type *, int, const char_traits::char_type &)'\n"
+                             "  `-CompoundStmt 0x220ede0 <line:15:1, line:18:1>\n"
+                             "    `-ReturnStmt 0x220edd0 <line:17:5, col:12>\n"
+                             "      `-IntegerLiteral 0x220edb0 <col:12> 'int' 0";
+        ASSERT_EQUALS("", parse(clang));
+    }
+
+    void cxxMethodDecl3() {
+        const char clang[] = "|-CXXRecordDecl 0x21cca40 <2.cpp:2:1, line:4:1> line:2:7 class Fred definition\n"
+                             "| |-DefinitionData pass_in_registers empty aggregate standard_layout trivially_copyable pod trivial literal has_constexpr_non_copy_move_ctor can_const_default_init\n"
+                             "| | |-DefaultConstructor exists trivial constexpr needs_implicit defaulted_is_constexpr\n"
+                             "| | |-CopyConstructor simple trivial has_const_param needs_implicit implicit_has_const_param\n"
+                             "| | |-MoveConstructor exists simple trivial needs_implicit\n"
+                             "| | |-CopyAssignment trivial has_const_param needs_implicit implicit_has_const_param\n"
+                             "| | |-MoveAssignment exists simple trivial needs_implicit\n"
+                             "| | `-Destructor simple irrelevant trivial needs_implicit\n"
+                             "| |-CXXRecordDecl 0x21ccb58 <col:1, col:7> col:7 implicit class Fred\n"
+                             "| `-CXXMethodDecl 0x21ccc68 <line:3:1, col:10> col:6 foo 'void ()'\n"
+                             "`-CXXMethodDecl 0x21ccd60 parent 0x21cca40 prev 0x21ccc68 <line:6:1, col:19> col:12 foo 'void ()'\n"
+                             "  `-CompoundStmt 0x21cce50 <col:18, col:19>";
+        ASSERT_EQUALS("class Fred\n"
+                      "{ void foo ( ) ; }\n"
+                      "\n"
+                      "\n"
+                      "void foo ( ) { }", parse(clang));
     }
 
     void cxxNewExpr() {
@@ -861,7 +918,8 @@ private:
     std::istringstream istr(clang); \
     clangimport::parseClangAstDump(&tokenizer, istr); \
     const SymbolDatabase *db = tokenizer.getSymbolDatabase(); \
-    ASSERT(db);
+    ASSERT(db); \
+    do {} while(false)
 
     void symbolDatabaseEnum1() {
         const char clang[] = "|-NamespaceDecl 0x29ad5f8 <1.cpp:1:1, line:3:1> line:1:11 ns\n"

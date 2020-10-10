@@ -317,6 +317,8 @@ def str05(data):
 # STR07-C
 # Use the bounds-checking interfaces for string manipulation
 def str07(data):
+    if(data.standards.c=='c89' or data.standards.c=='c99'):
+        return
     for token in data.tokenlist:
         if not isFunctionCall(token, ('strcpy', 'strcat')):
             continue
@@ -437,3 +439,5 @@ if __name__ == '__main__':
                 if actual not in VERIFY_EXPECTED:
                     print('Not expected: ' + actual)
                     sys.exit(1)
+
+    sys.exit(cppcheckdata.EXIT_CODE)

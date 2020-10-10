@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,7 +17,6 @@
  */
 
 #include "check.h"
-#include "errorlogger.h"
 #include "settings.h"
 #include "testsuite.h"
 #include "token.h"
@@ -245,6 +244,7 @@ private:
         TEST_CASE(garbageCode211); // #8764
         TEST_CASE(garbageCode212); // #8765
         TEST_CASE(garbageCode213); // #8758
+        TEST_CASE(garbageCode214);
 
         TEST_CASE(garbageCodeFuzzerClientMode1); // test cases created with the fuzzer client, mode 1
 
@@ -289,8 +289,6 @@ private:
             (*it)->runChecks(&tokenizer, &settings, this);
         }
 
-        tokenizer.simplifyTokenList2();
-
         return tokenizer.tokens()->stringifyList(false, false, false, true, false, nullptr, nullptr);
     }
 
@@ -316,7 +314,6 @@ private:
             Tokenizer tokenizer(&settings, this);
             std::istringstream istr(code);
             tokenizer.tokenize(istr, "test.cpp");
-            tokenizer.simplifyTokenList2();
             ASSERT_EQUALS("", errout.str());
         }
     }
@@ -399,7 +396,6 @@ private:
             Tokenizer tokenizer(&settings, this);
             std::istringstream istr(code);
             tokenizer.tokenize(istr, "test.c");
-            tokenizer.simplifyTokenList2();
             ASSERT_EQUALS("", errout.str());
         }
         {
@@ -407,7 +403,6 @@ private:
             Tokenizer tokenizer(&settings, this);
             std::istringstream istr(code);
             tokenizer.tokenize(istr, "test.cpp");
-            tokenizer.simplifyTokenList2();
             ASSERT_EQUALS("[test.cpp:1]: (information) The code 'class x y {' is not handled. You can use -I or --include to add handling of this code.\n", errout.str());
         }
     }
@@ -482,7 +477,7 @@ private:
     }
 
     void garbageCode10() { // #6127
-        checkCode("for( rl=reslist; rl!=NULL; rl=rl->next )");
+        ASSERT_THROW(checkCode("for( rl=reslist; rl!=NULL; rl=rl->next )"), InternalError);
     }
 
     void garbageCode12() { // do not crash
@@ -966,11 +961,11 @@ private:
     }
 
     void garbageCode123() {
-        ASSERT_THROW(checkCode("namespace pr16989 {\n"
-                               "    class C {\n"
-                               "        C tpl_mem(T *) { return }\n"
-                               "    };\n"
-                               "}"), InternalError);
+        checkCode("namespace pr16989 {\n"
+                  "    class C {\n"
+                  "        C tpl_mem(T *) { return }\n"
+                  "    };\n"
+                  "}");
     }
 
     void garbageCode125() {
@@ -1407,7 +1402,7 @@ private:
 
     void garbageCode164() {
         //7234
-        checkCode("class d{k p;}(){d::d():B<()}");
+        ASSERT_THROW(checkCode("class d{k p;}(){d::d():B<()}"), InternalError);
     }
 
     void garbageCode165() {
@@ -1664,6 +1659,10 @@ private:
 
     void garbageCode213() { // #8758
         ASSERT_THROW(checkCode("{\"\"[(1||)];}"), InternalError);
+    }
+
+    void garbageCode214() {
+        checkCode("THIS FILE CONTAINS VARIOUS TEXT");
     }
 
     void syntaxErrorFirstToken() {

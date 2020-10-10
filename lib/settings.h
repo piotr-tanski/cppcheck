@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,7 +22,6 @@
 //---------------------------------------------------------------------------
 
 #include "config.h"
-#include "errorlogger.h"
 #include "importproject.h"
 #include "library.h"
 #include "platform.h"
@@ -30,6 +29,7 @@
 #include "suppressions.h"
 #include "timer.h"
 
+#include <algorithm>
 #include <atomic>
 #include <list>
 #include <set>
@@ -71,33 +71,52 @@ private:
 public:
     Settings();
 
+    /** @brief addons, either filename of python/json file or json data */
     std::list<std::string> addons;
+
+    /** @brief Path to the python interpreter to be used to run addons. */
+    std::string addonPython;
 
     /** @brief Paths used as base for conversion to relative paths. */
     std::vector<std::string> basePaths;
 
+    /** @brief Bug hunting */
+    bool bugHunting;
+
+    /** Filename for bug hunting report */
+    std::string bugHuntingReport;
+
     /** @brief --cppcheck-build-dir */
     std::string buildDir;
 
-    /** @brief --file-filter for analyzing special files */
-    std::string fileFilter;
+    /** @brief check all configurations (false if -D or --max-configs is used */
+    bool checkAllConfigurations;
 
     /** Is the 'configuration checking' wanted? */
     bool checkConfiguration;
-
-    /** Check for incomplete info in library files? */
-    bool checkLibrary;
 
     /**
      * Check code in the headers, this is on by default but can
      * be turned off to save CPU */
     bool checkHeaders;
 
-    /** Check unused templates */
+    /** Check for incomplete info in library files? */
+    bool checkLibrary;
+
+    /** @brief List of selected Visual Studio configurations that should be checks */
+    std::list<std::string> checkVsConfigs;
+
+    /** @brief check unknown function return values */
+    std::set<std::string> checkUnknownFunctionReturn;
+
+    /** Check unused/uninstantiated templates */
     bool checkUnusedTemplates;
 
     /** Use Clang */
     bool clang;
+
+    /** Custom Clang executable */
+    std::string clangExecutable;
 
     /** Use clang-tidy */
     bool clangTidy;
@@ -105,17 +124,23 @@ public:
     /** @brief include paths excluded from checking the configuration */
     std::set<std::string> configExcludePaths;
 
-    /** @brief Is --debug-simplified given? */
-    bool debugSimplified;
+    /** @brief Are we running from DACA script? */
+    bool daca;
+
+    /** @brief Debug bug hunting */
+    bool debugBugHunting;
 
     /** @brief Is --debug-normal given? */
     bool debugnormal;
 
-    /** @brief Is --debug-warnings given? */
-    bool debugwarnings;
+    /** @brief Is --debug-simplified given? */
+    bool debugSimplified;
 
     /** @brief Is --debug-template given? */
     bool debugtemplate;
+
+    /** @brief Is --debug-warnings given? */
+    bool debugwarnings;
 
     /** @brief Is --dump given? */
     bool dump;
@@ -146,83 +171,26 @@ public:
      */
     bool experimental;
 
+    /** @brief --file-filter for analyzing special files */
+    std::string fileFilter;
+
     /** @brief Force checking the files with "too many" configurations (--force). */
     bool force;
+
+    std::map<std::string, std::string> functionContracts;
+
+    struct VariableContracts {
+        std::string minValue;
+        std::string maxValue;
+    };
+    std::map<std::string, VariableContracts> variableContracts;
 
     /** @brief List of include paths, e.g. "my/includes/" which should be used
         for finding include files inside source files. (-I) */
     std::list<std::string> includePaths;
 
-    /** @brief List of selected Visual Studio configurations that should be checks */
-    std::list<std::string> checkVsConfigs;
-
     /** @brief Inconclusive checks */
     bool inconclusive;
-
-    /** Do not only check how interface is used. Also check that interface is safe. */
-    class CPPCHECKLIB SafeChecks {
-    public:
-        SafeChecks() : classes(false), externalFunctions(false), internalFunctions(false), externalVariables(false) {}
-
-        static const char XmlRootName[];
-        static const char XmlClasses[];
-        static const char XmlExternalFunctions[];
-        static const char XmlInternalFunctions[];
-        static const char XmlExternalVariables[];
-
-        void clear() {
-            classes = externalFunctions = internalFunctions = externalVariables = false;
-        }
-
-        /**
-         * Public interface of classes
-         * - public function parameters can have any value
-         * - public functions can be called in any order
-         * - public variables can have any value
-         */
-        bool classes;
-
-        /**
-         * External functions
-         * - external functions can be called in any order
-         * - function parameters can have any values
-         */
-        bool externalFunctions;
-
-        /**
-         * Experimental: assume that internal functions can be used in any way
-         * This is only available in the GUI.
-         */
-        bool internalFunctions;
-
-        /**
-         * Global variables that can be modified outside the TU.
-         * - Such variable can have "any" value
-         */
-        bool externalVariables;
-    };
-
-    SafeChecks safeChecks;
-
-    /** @brief Bug hunting */
-    bool bugHunting;
-
-    /** @brief Debug bug hunting */
-    bool debugBugHunting;
-
-    /** Filename for bug hunting report */
-    std::string bugHuntingReport;
-
-    /** @brief Check diff */
-    struct Diff {
-        std::string filename;
-        int fromLine;
-        int toLine;
-    };
-    std::vector<Diff> checkDiff;
-
-    /** @brief check unknown function return values */
-    std::set<std::string> checkUnknownFunctionReturn;
 
     /** @brief Is --inline-suppr given? */
     bool inlineSuppressions;
@@ -243,17 +211,17 @@ public:
     Library library;
 
     /** @brief Load average value */
-    unsigned int loadAverage;
+    int loadAverage;
 
     /** @brief Maximum number of configurations to check before bailing.
         Default is 12. (--max-configs=N) */
-    unsigned int maxConfigs;
-
-    /** @brief --check all configurations */
-    bool checkAllConfigurations;
+    int maxConfigs;
 
     /** @brief --max-ctu-depth */
     int maxCtuDepth;
+
+    /** @brief max template recursion */
+    int maxTemplateRecursion;
 
     /** @brief suppress exitcode */
     Suppressions nofail;
@@ -301,6 +269,51 @@ public:
      * @brief Extra rules
      */
     std::list<Rule> rules;
+
+    /** Do not only check how interface is used. Also check that interface is safe. */
+    class CPPCHECKLIB SafeChecks {
+    public:
+        SafeChecks() : classes(false), externalFunctions(false), internalFunctions(false), externalVariables(false) {}
+
+        static const char XmlRootName[];
+        static const char XmlClasses[];
+        static const char XmlExternalFunctions[];
+        static const char XmlInternalFunctions[];
+        static const char XmlExternalVariables[];
+
+        void clear() {
+            classes = externalFunctions = internalFunctions = externalVariables = false;
+        }
+
+        /**
+         * Public interface of classes
+         * - public function parameters can have any value
+         * - public functions can be called in any order
+         * - public variables can have any value
+         */
+        bool classes;
+
+        /**
+         * External functions
+         * - external functions can be called in any order
+         * - function parameters can have any values
+         */
+        bool externalFunctions;
+
+        /**
+         * Experimental: assume that internal functions can be used in any way
+         * This is only available in the GUI.
+         */
+        bool internalFunctions;
+
+        /**
+         * Global variables that can be modified outside the TU.
+         * - Such variable can have "any" value
+         */
+        bool externalVariables;
+    };
+
+    SafeChecks safeChecks;
 
     /** @brief show timing information (--showtime=file|summary|top5) */
     SHOWTIME_MODES showtime;
@@ -383,8 +396,6 @@ public:
     * @return true if the value can be shown
     */
     bool isEnabled(const ValueFlow::Value *value, bool inconclusiveCheck=false) const;
-
-    static std::vector<Diff> loadDiffFile(std::istream &istr);
 
     /** Is posix library specified? */
     bool posix() const {

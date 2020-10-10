@@ -13,6 +13,8 @@ import sys
 from xml.etree import ElementTree
 from fnmatch import fnmatch
 
+EXIT_CODE = 0
+
 class Directive:
     """
     Directive class. Contains information about each preprocessor directive in the source code.
@@ -135,6 +137,8 @@ class Token:
         isUnsigned         Is this token a unsigned type
         isSigned           Is this token a signed type
         isExpandedMacro    Is this token a expanded macro token
+        isSplittedVarDeclComma  Is this a comma changed to semicolon in a splitted variable declaration ('int a,b;' => 'int a; int b;')
+        isSplittedVarDeclEq     Is this a '=' changed to semicolon in a splitted variable declaration ('int a=5;' => 'int a; a=5;')
         varId              varId for token, each variable has a unique non-zero id
         variable           Variable information for this token. See the Variable class.
         function           If this token points at a function call, this attribute has the Function
@@ -183,6 +187,8 @@ class Token:
     isUnsigned = False
     isSigned = False
     isExpandedMacro = False
+    isSplittedVarDeclComma = False
+    isSplittedVarDeclEq = False
     varId = None
     variableId = None
     variable = None
@@ -243,6 +249,10 @@ class Token:
                 self.isLogicalOp = True
         if element.get('isExpandedMacro'):
             self.isExpandedMacro = True
+        if element.get('isSplittedVarDeclComma'):
+            self.isSplittedVarDeclComma = True
+        if element.get('isSplittedVarDeclEq'):
+            self.isSplittedVarDeclEq = True
         self.linkId = element.get('link')
         self.link = None
         if element.get('varId'):
@@ -273,10 +283,10 @@ class Token:
         attrs = ["Id", "str", "scopeId", "isName", "isUnsigned", "isSigned",
                 "isNumber", "isInt", "isFloat", "isString", "strlen",
                 "isChar", "isOp", "isArithmeticalOp", "isComparisonOp",
-                "isLogicalOp", "isExpandedMacro", "linkId", "varId",
-                "variableId", "functionId", "valuesId", "valueType",
-                "typeScopeId", "astParentId", "astOperand1Id", "file",
-                "linenr", "column"]
+                "isLogicalOp", "isExpandedMacro", "isSplittedVarDeclComma",
+                "isSplittedVarDeclEq","linkId", "varId", "variableId",
+                "functionId", "valuesId", "valueType", "typeScopeId",
+                "astParentId", "astOperand1Id", "file", "linenr", "column"]
         return "{}({})".format(
             "Token",
             ", ".join(("{}={}".format(a, repr(getattr(self, a))) for a in attrs))
@@ -392,8 +402,9 @@ class Function:
     isVirtual = None
     isImplicitlyVirtual = None
     isStatic = None
+    nestedIn = None
 
-    def __init__(self, element):
+    def __init__(self, element, nestedIn):
         self.Id = element.get('id')
         self.tokenDefId = element.get('tokenDef')
         self.name = element.get('name')
@@ -404,6 +415,7 @@ class Function:
         self.isImplicitlyVirtual = (isImplicitlyVirtual and isImplicitlyVirtual == 'true')
         isStatic = element.get('isStatic')
         self.isStatic = (isStatic and isStatic == 'true')
+        self.nestedIn = nestedIn
 
         self.argument = {}
         self.argumentId = {}
@@ -940,7 +952,7 @@ class CppcheckData:
                 continue
             elif node.tag == 'function':
                 if event == 'start':
-                    cfg_function = Function(node)
+                    cfg_function = Function(node, cfg.scopes[-1])
                     continue
                 elif event == 'end':
                     cfg.functions.append(cfg_function)
@@ -1100,3 +1112,5 @@ def reportError(location, severity, message, addon, errorId, extra=''):
         if len(extra) > 0:
             message += ' (' + extra + ')'
         sys.stderr.write('%s (%s) %s [%s-%s]\n' % (loc, severity, message, addon, errorId))
+        global EXIT_CODE
+        EXIT_CODE = 1

@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,6 +18,7 @@
 
 #include "checkcondition.h"
 #include "library.h"
+#include "preprocessor.h"
 #include "settings.h"
 #include "testsuite.h"
 #include "tokenize.h"
@@ -136,10 +137,14 @@ private:
         std::map<std::string, simplecpp::TokenList*> filedata;
         simplecpp::preprocess(tokens2, tokens1, files, filedata, simplecpp::DUI());
 
+        Preprocessor preprocessor(settings0, nullptr);
+        preprocessor.setDirectives(tokens1);
+
         // Tokenizer..
         Tokenizer tokenizer(&settings0, this);
-        tokenizer.createTokens(&tokens2);
+        tokenizer.createTokens(std::move(tokens2));
         tokenizer.simplifyTokens1("");
+        tokenizer.setPreprocessor(&preprocessor);
 
         // Run checks..
         CheckCondition checkCondition;
@@ -878,7 +883,7 @@ private:
               "        a++;\n"
               "}\n"
              );
-        ASSERT_EQUALS("", errout.str());
+        ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:2]: (style) Condition 'x!=3' is always true\n", errout.str());
 
         check("void f(int x) {\n"
               "    if ((x != 1) && (x != 3))\n"
@@ -945,7 +950,7 @@ private:
               "    if ((x == 1) && (x == 0x00000001))\n"
               "        a++;\n"
               "}");
-        ASSERT_EQUALS("", errout.str());
+        ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:2]: (style) Condition 'x==0x00000001' is always true\n", errout.str());
 
         check("void f(int x) {\n"
               "    if (x == 1 && x == 3)\n"
@@ -2305,6 +2310,12 @@ private:
               "  }"
               "}");
         ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:3]: (warning) Opposite inner 'if' condition leads to a dead code block.\n", errout.str());
+
+        check("void f(bool x, const int a, const int b) {\n"
+              "        if(x && a < b)\n"
+              "            if( x && a > b){}\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:3]: (warning) Opposite inner 'if' condition leads to a dead code block.\n", errout.str());
     }
 
     void oppositeInnerConditionEmpty() {
@@ -2321,7 +2332,7 @@ private:
         ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:1]: (warning) Opposite inner 'if' condition leads to a dead code block.\n", errout.str());
 
         check("template<class T> void f1(const T &s) { if(s.size() > 42) if(s.empty()) {}} ");
-        ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:1]: (warning) Opposite inner 'if' condition leads to a dead code block.\n", errout.str());
+        ASSERT_EQUALS("", errout.str()); //We don't know the type of T so we don't know the relationship between size() and empty(). e.g. s might be a 50 tonne truck with nothing in it.
 
         check("void f2(const std::wstring &s) { if(s.empty()) if(s.size() > 42) {}} ");
         ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:1]: (warning) Opposite inner 'if' condition leads to a dead code block.\n", errout.str());
@@ -2570,6 +2581,18 @@ private:
               "    int FileIndex;  \n"
               "};\n");
         ASSERT_EQUALS("", errout.str());
+
+        // #8858 - #if
+        check("short Do() {\n"
+              "    short ret = bar1();\n"
+              "    if ( ret )\n"
+              "        return ret;\n"
+              "#ifdef FEATURE\n"
+              "    ret = bar2();\n"
+              "#endif\n"
+              "    return ret;\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
     }
 
     void innerConditionModified() {
@@ -2689,6 +2712,16 @@ private:
               "  if (!x || (x && (2>(y-1)))) {}\n"
               "}");
         ASSERT_EQUALS("[test.cpp:2]: (style) Redundant condition: x. '!x || (x && 2>(y-1))' is equivalent to '!x || 2>(y-1)'\n", errout.str());
+
+        check("void f(bool a, bool b) {\n"
+              "    if (a || (a && b)) {}\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Redundant condition: a. 'a || (a && b)' is equivalent to 'a'\n", errout.str());
+
+        check("void f(bool a, bool b) {\n"
+              "    if (a && (a || b)) {}\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Redundant condition: a. 'a && (a || b)' is equivalent to 'a'\n", errout.str());
     }
 
     // clarify conditions with bitwise operator and comparison
@@ -2854,7 +2887,7 @@ private:
               "  if(x == 0) { x++; return x == 0; } \n"
               "  return false;\n"
               "}");
-        TODO_ASSERT_EQUALS("return value is always true?", "", errout.str());
+        ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:2]: (style) Condition 'x==0' is always false\n", errout.str());
 
         check("void f() {\n" // #6898 (Token::expressionString)
               "  int x = 0;\n"
@@ -2960,14 +2993,17 @@ private:
         // Avoid FP for sizeof condition
         check("void f() {\n"
               "  if (sizeof(char) != 123) {}\n"
+              "  if (123 != sizeof(char)) {}\n"
               "}");
         ASSERT_EQUALS("", errout.str());
 
         check("void f() {\n"
               "  int x = 123;\n"
               "  if (sizeof(char) != x) {}\n"
+              "  if (x != sizeof(char)) {}\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:3]: (style) Condition 'sizeof(char)!=x' is always true\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (style) Condition 'sizeof(char)!=x' is always true\n"
+                      "[test.cpp:4]: (style) Condition 'x!=sizeof(char)' is always true\n", errout.str());
 
         // Don't warn in assertions. Condition is often 'always true' by intention.
         // If platform,defines,etc cause an 'always false' assertion then that is not very dangerous neither
@@ -3175,7 +3211,7 @@ private:
               "    if (handle) return 1;\n"
               "    else return 0;\n"
               "}\n");
-        ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:3]: (style) Condition 'handle' is always false\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:3]: (warning) Identical condition 'handle!=0', second condition is always false\n", errout.str());
 
         check("void f(void* x, void* y) {\n"
               "    if (x == nullptr && y == nullptr)\n"
@@ -3276,6 +3312,17 @@ private:
               "}\n");
         ASSERT_EQUALS("", errout.str());
 
+        check("int foo() {\n"
+              "    auto x = getX();\n"
+              "    if (x == nullptr)\n"
+              "        return 1;\n"
+              "    auto y = dynamic_cast<Y*>(x)\n"
+              "    if (y == nullptr)\n"
+              "        return 2;\n"
+              "    return 3;\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
         // handleKnownValuesInLoop
         check("bool g();\n"
               "void f(bool x) {\n"
@@ -3356,6 +3403,56 @@ private:
               "    if (!x) {}\n"
               "}\n");
         ASSERT_EQUALS("", errout.str());
+
+        // #9709
+        check("void f(int a) {\n"
+              "    bool ok = false;\n"
+              "    const char * r = nullptr;\n"
+              "    do_something(&r);\n"
+              "    if (r != nullptr)\n"
+              "        ok = a != 0;\n"
+              "    if (ok) {}\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        // #9816
+        check("bool g();\n"
+              "void f() {\n"
+              "    bool b = false;\n"
+              "    do {\n"
+              "        do {\n"
+              "            if (g())\n"
+              "                break;\n"
+              "            b = true;\n"
+              "        } while(false);\n"
+              "    } while(!b);\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        // #9865
+        check("void f(const std::string &s) {\n"
+              "    for (std::string::const_iterator it = s.begin(); it != s.end(); ++it) {\n"
+              "        const unsigned char c = static_cast<unsigned char>(*it);\n"
+              "        if (c == '0') {}\n"
+              "        else if ((c == 'a' || c == 'A')\n"
+              "                 || (c == 'b' || c == 'B')) {}\n"
+              "        else {}\n"
+              "    }\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        // #9711
+        check("int main(int argc, char* argv[]) {\n"
+              "  int foo = 0;\n"
+              "  struct option options[] = {\n"
+              "    {\"foo\", no_argument, &foo, \'f\'},\n"
+              "    {NULL, 0, NULL, 0},\n"
+              "  };\n"
+              "  getopt_long(argc, argv, \"f\", options, NULL);\n"
+              "  if (foo) {}\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
     }
 
     void alwaysTrueInfer() {
@@ -3485,6 +3582,15 @@ private:
               "    return pos;\n"
               "}\n");
         ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:5]: (style) Condition 'pos>0' is always true\n", errout.str());
+
+        // #9721
+        check("void f(int x) {\n"
+              "    if (x > 127) {\n"
+              "        if ( (x>255) || (-128>x) )\n"
+              "            return;\n"
+              "    }\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:3]: (style) Condition '-128>x' is always false\n", errout.str());
     }
 
     void alwaysTrueContainer() {
@@ -3511,6 +3617,17 @@ private:
               "    if ( !g.empty() )\n"
               "        return;\n"
               "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("struct A {\n"
+              "    std::vector<int> v;\n"
+              "    void g();\n"
+              "    void f(bool b) {\n"
+              "        v.clear();\n"
+              "        g();\n"
+              "        return !v.empty();\n"
+              "    }\n"
+              "};\n");
         ASSERT_EQUALS("", errout.str());
     }
 
@@ -3553,6 +3670,15 @@ private:
               "  if(b[1] == 2) {}\n"
               "}\n");
         ASSERT_EQUALS("[test.cpp:3]: (style) Condition 'b[1]==2' is always false\n", errout.str());
+
+        // #9878
+        check("void f(bool a, bool b) {\n"
+              "    if (a && b){;}\n"
+              "    else if (!a && b){;}\n"
+              "    else if (!a && !b){;}\n"
+              "    else {;}\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
     }
 
     void duplicateCondition() {
@@ -3635,6 +3761,72 @@ private:
               "void f(A a, int c) {\n"
               "    if (a.b) a.b = c;\n"
               "    if (a.b) {}\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("struct A {\n"
+              "    int a;\n"
+              "    void b() const {\n"
+              "        return a == 1;\n"
+              "    }\n"
+              "    void c();\n"
+              "    void d() {\n"
+              "        if(b()) {\n"
+              "            c();\n"
+              "        }\n"
+              "        if (b()) {\n"
+              "            a = 3;\n"
+              "        }\n"
+              "    }\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("struct A {\n"
+              "    int a;\n"
+              "    void b() const {\n"
+              "        return a == 1;\n"
+              "    }\n"
+              "    void d() {\n"
+              "        if(b()) {\n"
+              "            a = 2;\n"
+              "        }\n"
+              "        if (b()) {\n"
+              "            a = 3;\n"
+              "        }\n"
+              "    }\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("struct A {\n"
+              "    int a;\n"
+              "    void b() const {\n"
+              "        return a == 1;\n"
+              "    }\n"
+              "    void d() {\n"
+              "        if(b()) {\n"
+              "        }\n"
+              "        if (b()) {\n"
+              "            a = 3;\n"
+              "        }\n"
+              "    }\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:7] -> [test.cpp:9]: (style) The if condition is the same as the previous if condition\n",
+                      errout.str());
+
+        check("void f(bool a, bool b) {\n"
+              "    auto g = [&] { b = !a; };\n"
+              "    if (b)\n"
+              "        g();\n"
+              "    if (b) {}\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("void g(bool& a);\n"
+              "void f(bool b) {\n"
+              "    auto h = std::bind(&g, std::ref(b));\n"
+              "    if (b)\n"
+              "        h();\n"
+              "    if (b) {}\n"
               "}\n");
         ASSERT_EQUALS("", errout.str());
     }
@@ -3726,6 +3918,12 @@ private:
         check("bool f();\n"
               "void foo() { bool x = true; if(x&&f()) {}}\n");
         ASSERT_EQUALS("[test.cpp:2]: (style) Condition 'x' is always true\n", errout.str());
+
+        // #9578
+        check("bool f(const std::string &s) {\n"
+              "        return s.size()>2U && s[0]=='4' && s[0]=='2';\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:2]: (style) Condition 's[0]=='2'' is always false\n", errout.str());
     }
 
     void pointerAdditionResultNotNull() {

@@ -1,6 +1,6 @@
 ﻿/*
 * Cppcheck - A tool for static C/C++ code analysis
-* Copyright (C) 2007-2019 Cppcheck team.
+* Copyright (C) 2007-2020 Cppcheck team.
 *
 * This program is free software: you can redistribute it and/or modify
 * it under the terms of the GNU General Public License as published by
@@ -16,13 +16,14 @@
 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "config.h"
 #include "cppcheckexecutor.h"
 #include "errorlogger.h"
-#include "cppcheck.h"
 #include "filelister.h"
 #include "path.h"
 #include "pathmatch.h"
 #include "redirect.h"
+#include "settings.h"
 #include "testsuite.h"
 
 #include <algorithm>
@@ -130,7 +131,7 @@ private:
 
             exec.reportOut(*i);
 
-            ErrorLogger::ErrorMessage errMessage;
+            ErrorMessage errMessage;
             errMessage.setmsg(*i);
 
             // no xml option
@@ -153,9 +154,9 @@ private:
 
             CLEAR_REDIRECT_ERROUT;
             // possible change of msg for xml option
-            // with ErrorLogger::ErrorMessage::fixInvalidChars(), plus additional XML formatting
+            // with ErrorMessage::fixInvalidChars(), plus additional XML formatting
             execXML.reportInfo(errMessage);
-            // undo the effects of "ErrorLogger::ErrorMessage::fixInvalidChars()"
+            // undo the effects of "ErrorMessage::fixInvalidChars()"
             // replacing octal constants with characters
             std::string myErr;
             std::string myErrOrg = GET_REDIRECT_ERROUT;

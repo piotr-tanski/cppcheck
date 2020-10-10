@@ -7,13 +7,14 @@ import os
 def find_cppcheck_binary():
     possible_locations = [
         "./cppcheck",
+        "./build/bin/cppcheck",
         r".\bin\cppcheck.exe",
     ]
     for location in possible_locations:
         if os.path.exists(location):
             break
     else:
-        raise RuntimeError("Could not fine cppcheck binary")
+        raise RuntimeError("Could not find cppcheck binary")
 
     return location
 

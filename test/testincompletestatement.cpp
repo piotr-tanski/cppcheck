@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -51,7 +51,7 @@ private:
 
         // Tokenize..
         Tokenizer tokenizer(&settings, this);
-        tokenizer.createTokens(&tokens2);
+        tokenizer.createTokens(std::move(tokens2));
         tokenizer.simplifyTokens1("");
 
         // Check for incomplete statements..
@@ -84,11 +84,13 @@ private:
         TEST_CASE(cpp11init3);          // #8995
         TEST_CASE(block);               // ({ do_something(); 0; })
         TEST_CASE(mapindex);
-        TEST_CASE(commaoperator);
+        TEST_CASE(commaoperator1);
+        TEST_CASE(commaoperator2);
         TEST_CASE(redundantstmts);
         TEST_CASE(vardecl);
         TEST_CASE(archive);             // ar & x
         TEST_CASE(ast);
+        TEST_CASE(oror);                // dostuff() || x=32;
     }
 
     void test1() {
@@ -336,12 +338,19 @@ private:
     }
 
     // #8827
-    void commaoperator() {
+    void commaoperator1() {
         check("void foo(int,const char*,int);\n"
               "void f(int value) {\n"
               "    foo(42,\"test\",42),(value&42);\n"
               "}\n");
         ASSERT_EQUALS("[test.cpp:3]: (warning) Found suspicious operator ','\n", errout.str());
+    }
+
+    void commaoperator2() {
+        check("void f() {\n"
+              "    for(unsigned int a=0, b; a<10; a++ ) {}\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
     }
 
     // #8451
@@ -413,6 +422,13 @@ private:
 
     void ast() {
         check("struct c { void a() const { for (int x=0; x;); } };", true);
+        ASSERT_EQUALS("", errout.str());
+    }
+
+    void oror() {
+        check("void foo() {\n"
+              "    params_given (params, \"overrides\") || (overrides = \"1\");\n"
+              "}", true);
         ASSERT_EQUALS("", errout.str());
     }
 };

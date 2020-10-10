@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -74,11 +74,6 @@ private:
         TEST_CASE(noOperatorEq); // class with memory management should have operator eq
         TEST_CASE(noDestructor); // class with memory management should have destructor
 
-        TEST_CASE(operatorEq1);
-        TEST_CASE(operatorEq2);
-        TEST_CASE(operatorEq3); // ticket #3051
-        TEST_CASE(operatorEq4); // ticket #3114
-        TEST_CASE(operatorEq5); // ticket #3296
         TEST_CASE(operatorEqRetRefThis1);
         TEST_CASE(operatorEqRetRefThis2); // ticket #1323
         TEST_CASE(operatorEqRetRefThis3); // ticket #1405
@@ -175,6 +170,7 @@ private:
         TEST_CASE(const65); // ticket #8693
         TEST_CASE(const66); // ticket #7714
         TEST_CASE(const67); // ticket #9193
+        TEST_CASE(const68); // ticket #6471
         TEST_CASE(const_handleDefaultParameters);
         TEST_CASE(const_passThisToMemberOfOtherClass);
         TEST_CASE(assigningPointerToPointerIsNotAConstOperation);
@@ -202,6 +198,7 @@ private:
         TEST_CASE(constRangeBasedFor); // #5514
         TEST_CASE(const_shared_ptr);
         TEST_CASE(constPtrToConstPtr);
+        TEST_CASE(constTrailingReturnType);
 
         TEST_CASE(initializerListOrder);
         TEST_CASE(initializerListUsage);
@@ -235,7 +232,6 @@ private:
         Tokenizer tokenizer(&settings, this);
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
 
         // Check..
         CheckClass checkClass(&tokenizer, &settings, this);
@@ -339,7 +335,6 @@ private:
         Tokenizer tokenizer(&settings0, this);
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
 
         // Check..
         CheckClass checkClass(&tokenizer, &settings0, this);
@@ -449,7 +444,6 @@ private:
         Tokenizer tokenizer(&settings1, this);
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
 
         // Check..
         CheckClass checkClass(&tokenizer, &settings1, this);
@@ -571,7 +565,6 @@ private:
         Tokenizer tokenizer(&settings0, this);
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
 
         // Check..
         CheckClass checkClass(&tokenizer, &settings0, this);
@@ -596,7 +589,7 @@ private:
                              "   F&operator=(const F&);\n"
                              "   ~F();\n"
                              "};");
-        ASSERT_EQUALS("[test.cpp:5]: (warning) Value of pointer 'p', which points to allocated memory, is copied in copy constructor instead of allocating new memory.\n", errout.str());
+        TODO_ASSERT_EQUALS("[test.cpp:5]: (warning) Value of pointer 'p', which points to allocated memory, is copied in copy constructor instead of allocating new memory.\n", "", errout.str());
 
         checkCopyConstructor("class F {\n"
                              "   char *p;\n"
@@ -631,7 +624,7 @@ private:
                              "};");
         TODO_ASSERT_EQUALS("[test.cpp:5]: (warning) Value of pointer 'p', which points to allocated memory, is copied in copy constructor instead of allocating new memory.\n"
                            "[test.cpp:5] -> [test.cpp:10]: (warning) Copy constructor does not allocate memory for member 'p' although memory has been allocated in other constructors.\n",
-                           "[test.cpp:5]: (warning) Value of pointer 'p', which points to allocated memory, is copied in copy constructor instead of allocating new memory.\n"
+                           ""
                            , errout.str());
 
         checkCopyConstructor("class kalci\n"
@@ -727,7 +720,7 @@ private:
                              "   ~F();\n"
                              "   F& operator=(const F&f);\n"
                              "};");
-        ASSERT_EQUALS("[test.cpp:8]: (warning) Class 'F' does not have a copy constructor which is recommended since it has dynamic memory/resource allocation(s).\n", errout.str());
+        TODO_ASSERT_EQUALS("[test.cpp:8]: (warning) Class 'F' does not have a copy constructor which is recommended since it has dynamic memory/resource allocation(s).\n", "", errout.str());
 
         checkCopyConstructor("class F\n"
                              "{\n"
@@ -970,173 +963,6 @@ private:
         ASSERT_EQUALS("", errout.str());
     }
 
-    // Check the operator Equal
-    void checkOpertorEq(const char code[]) {
-        // Clear the error log
-        errout.str("");
-
-        settings0.inconclusive = true;
-
-        // Tokenize..
-        Tokenizer tokenizer(&settings0, this);
-        std::istringstream istr(code);
-        tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
-
-        // Check..
-        CheckClass checkClass(&tokenizer, &settings0, this);
-        checkClass.operatorEq();
-    }
-
-    void operatorEq1() {
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "public:\n"
-                       "    void goo() {}"
-                       "    void operator=(const A&);\n"
-                       "};");
-        ASSERT_EQUALS("[test.cpp:4]: (style) 'A::operator=' should return 'A &'.\n", errout.str());
-
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "public:\n"
-                       "    void goo() {}"
-                       "    void operator=(const A&)=delete;\n"
-                       "};");
-        ASSERT_EQUALS("", errout.str());
-
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "public:\n"
-                       "    void goo() {}"
-                       "    void operator=(A&);\n"
-                       "};");
-        ASSERT_EQUALS("[test.cpp:4]: (style) 'A::operator=' should return 'A &'.\n", errout.str());
-
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "private:\n"
-                       "    void operator=(const A&);\n"
-                       "};");
-        ASSERT_EQUALS("", errout.str());
-
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "protected:\n"
-                       "    void operator=(const A&);\n"
-                       "};");
-        ASSERT_EQUALS("", errout.str());
-
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "private:\n"
-                       "    void operator=(const A&)=delete;\n"
-                       "};");
-        ASSERT_EQUALS("", errout.str());
-
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "    void operator=(const A&);\n"
-                       "};");
-        ASSERT_EQUALS("", errout.str());
-
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "public:\n"
-                       "    void goo() {}\n"
-                       "private:\n"
-                       "    void operator=(const A&);\n"
-                       "};");
-        ASSERT_EQUALS("", errout.str());
-
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "public:\n"
-                       "    void operator=(const A&);\n"
-                       "};\n"
-                       "class B\n"
-                       "{\n"
-                       "public:\n"
-                       "    void operator=(const B&);\n"
-                       "};");
-        ASSERT_EQUALS("[test.cpp:4]: (style) 'A::operator=' should return 'A &'.\n"
-                      "[test.cpp:9]: (style) 'B::operator=' should return 'B &'.\n", errout.str());
-
-        checkOpertorEq("struct A\n"
-                       "{\n"
-                       "    void operator=(const A&);\n"
-                       "};");
-        ASSERT_EQUALS("[test.cpp:3]: (style) 'A::operator=' should return 'A &'.\n", errout.str());
-
-        checkOpertorEq("struct A\n"
-                       "{\n"
-                       "    void operator=(const A&)=delete;\n"
-                       "};");
-        ASSERT_EQUALS("", errout.str());
-
-        // Ticket #7017
-        checkOpertorEq("template<class T> struct X {\n"
-                       "  inline X(const X& Rhs);\n"
-                       "  inline X<T>& operator =(const X& Rhs);\n"
-                       "};");
-        ASSERT_EQUALS("", errout.str());
-    }
-
-    void operatorEq2() {
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "public:\n"
-                       "    void * operator=(const A&);\n"
-                       "};");
-        ASSERT_EQUALS("[test.cpp:4]: (style) 'A::operator=' should return 'A &'.\n", errout.str());
-
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "public:\n"
-                       "    A * operator=(const A&);\n"
-                       "};");
-        ASSERT_EQUALS("[test.cpp:4]: (style) 'A::operator=' should return 'A &'.\n", errout.str());
-
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "public:\n"
-                       "    const A & operator=(const A&);\n"
-                       "};");
-        ASSERT_EQUALS("[test.cpp:4]: (style) 'A::operator=' should return 'A &'.\n", errout.str());
-
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "public:\n"
-                       "    B & operator=(const A&);\n"
-                       "};");
-        ASSERT_EQUALS("[test.cpp:4]: (style) 'A::operator=' should return 'A &'.\n", errout.str());
-    }
-
-    void operatorEq3() { // ticket #3051
-        checkOpertorEq("class A\n"
-                       "{\n"
-                       "public:\n"
-                       "    A * operator=(const A*);\n"
-                       "};");
-        ASSERT_EQUALS("", errout.str());
-    }
-
-    void operatorEq4() { // ticket #3114 (infinite loop)
-        checkOpertorEq("struct A {\n"
-                       "    A& operator=(A const& a) { return operator=(&a); }\n"
-                       "    A& operator=(const A*) { return *this; }\n"
-                       "};");
-        ASSERT_EQUALS("", errout.str());
-    }
-
-    void operatorEq5() { // ticket #3296 (virtual operator)
-        checkOpertorEq(
-            "class A {\n"
-            "    virtual A& operator=(const A &a) {return *this};\n"
-            "};");
-        ASSERT_EQUALS("", errout.str());
-    }
-
     // Check that operator Equal returns reference to this
     void checkOpertorEqRetRefThis(const char code[]) {
         // Clear the error log
@@ -1146,7 +972,6 @@ private:
         Tokenizer tokenizer(&settings0, this);
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
 
         // Check..
         CheckClass checkClass(&tokenizer, &settings0, this);
@@ -1610,7 +1435,6 @@ private:
         Tokenizer tokenizer(&settings1, this);
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
 
         // Check..
         CheckClass checkClass(&tokenizer, &settings1, this);
@@ -2433,7 +2257,6 @@ private:
         Tokenizer tokenizer(&settings0, this);
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
 
         // Check..
         CheckClass checkClass(&tokenizer, &settings0, this);
@@ -2699,6 +2522,22 @@ private:
                                "    delete base;\n"
                                "}\n", true);
         ASSERT_EQUALS("[test.cpp:3]: (error) Class 'Base' which is inherited by class 'Derived' does not have a virtual destructor.\n", errout.str());
+
+        // class Base destructor is not virtual but protected -> no error
+        checkVirtualDestructor("class Base {\n"
+                               "public:\n"
+                               "    virtual void foo(){}\n"
+                               "protected:\n"
+                               "    ~Base(){}\n"
+                               "};\n", true);
+        ASSERT_EQUALS("", errout.str());
+
+        checkVirtualDestructor("class C {\n"
+                               "private:\n"
+                               "    C();\n"
+                               "    virtual ~C();\n"
+                               "};\n", true);
+        ASSERT_EQUALS("", errout.str());
     }
 
     void checkNoMemset(const char code[]) {
@@ -3306,7 +3145,6 @@ private:
         Tokenizer tokenizer(&settings1, this);
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
 
         // Check..
         CheckClass checkClass(&tokenizer, &settings1, this);
@@ -3344,7 +3182,6 @@ private:
         Tokenizer tokenizer(s, this);
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
 
         CheckClass checkClass(&tokenizer, s, this);
         checkClass.checkConst();
@@ -5686,6 +5523,17 @@ private:
         ASSERT_EQUALS("[test.cpp:8]: (style, inconclusive) Technically the member function 'Test::get' can be const.\n", errout.str());
     }
 
+    void const68() { // #6471
+        checkConst("class MyClass {\n"
+                   "    void clear() {\n"
+                   "        SVecPtr v = (SVecPtr) m_data;\n"
+                   "        v->clear();\n"
+                   "    }\n"
+                   "    void* m_data;\n"
+                   "};\n");
+        ASSERT_EQUALS("", errout.str());
+    }
+
     void const_handleDefaultParameters() {
         checkConst("struct Foo {\n"
                    "    void foo1(int i, int j = 0) {\n"
@@ -6450,6 +6298,10 @@ private:
                    "        for (const auto & e : array)\n"
                    "            foo(e);\n"
                    "    }\n"
+                   "    void f3() {\n"
+                   "        for (decltype(auto) e : array)\n"
+                   "            foo(e);\n"
+                   "    }\n"
                    "};");
         ASSERT_EQUALS("[test.cpp:8]: (style, inconclusive) Technically the member function 'Fred::f2' can be const.\n", errout.str());
     }
@@ -6474,6 +6326,14 @@ private:
         ASSERT_EQUALS("[test.cpp:4]: (style, inconclusive) Technically the member function 'Fred::getData' can be const.\n", errout.str());
     }
 
+    void constTrailingReturnType() { // #9814
+        checkConst("struct A {\n"
+                   "    int x = 1;\n"
+                   "    auto get() -> int & { return x; }\n"
+                   "};");
+        ASSERT_EQUALS("", errout.str());
+    }
+
     void checkInitializerListOrder(const char code[]) {
         // Clear the error log
         errout.str("");
@@ -6485,7 +6345,6 @@ private:
         Tokenizer tokenizer(&settings0, this);
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
 
         CheckClass checkClass(&tokenizer, &settings0, this);
         checkClass.initializerListOrder();
@@ -6521,7 +6380,6 @@ private:
         Tokenizer tokenizer(&settings, this);
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
 
         CheckClass checkClass(&tokenizer, &settings, this);
         checkClass.initializationListUsage();
@@ -6709,6 +6567,19 @@ private:
                                      "    Foo m_i;\n"
                                      "};");
         ASSERT_EQUALS("", errout.str());
+
+        checkInitializationListUsage("class A {\n" // #9821 - delegate constructor
+                                     "public:\n"
+                                     "    A() : st{} {}\n"
+                                     "\n"
+                                     "    explicit A(const std::string &input): A() {\n"
+                                     "        st = input;\n"
+                                     "    }\n"
+                                     "\n"
+                                     "private:\n"
+                                     "    std::string st;\n"
+                                     "};");
+        ASSERT_EQUALS("", errout.str());
     }
 
 
@@ -6720,7 +6591,6 @@ private:
         Tokenizer tokenizer(&settings0, this);
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
 
         CheckClass checkClass(&tokenizer, &settings0, this);
         checkClass.checkSelfInitialization();
@@ -6824,7 +6694,6 @@ private:
         Tokenizer tokenizer(s, this);
         std::istringstream istr(code);
         tokenizer.tokenize(istr, "test.cpp");
-        tokenizer.simplifyTokenList2();
 
         CheckClass checkClass(&tokenizer, s, this);
         checkClass.checkVirtualFunctionCallInConstructor();
@@ -7305,6 +7174,22 @@ private:
                               "};\n"
                               "\n"
                               "C* C::instanceSingleton;");
+        ASSERT_EQUALS("", errout.str());
+
+        // Avoid false positive when pointer is deleted in lambda
+        checkThisUseAfterFree("class C {\n"
+                              "public:\n"
+                              "    void foo();\n"
+                              "    void set() { p = this; }\n"
+                              "    void dostuff() {}\n"
+                              "    C* p;\n"
+                              "};\n"
+                              "\n"
+                              "void C::foo() {\n"
+                              "    auto done = [this] () { delete p; };\n"
+                              "    dostuff();\n"
+                              "    done();\n"
+                              "}");
         ASSERT_EQUALS("", errout.str());
     }
 };

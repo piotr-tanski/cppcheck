@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -77,10 +77,19 @@ public:
         bool useMfc;
 
         void parseCommand(const std::string &command);
+
+        void parseCommandStd(const std::string& command, std::string::size_type *pos, std::string& defs);
+        void parseCommandDefine(const std::string& command, std::string::size_type *pos, std::string& defs);
+        void parseCommandUndefine(const std::string& command,  std::string::size_type *pos);
+        void parseCommandInclude(const std::string& command,  std::string::size_type *pos);
+        void parseCommandSystemInclude(const std::string& command,  std::string::size_type *pos);
         void setDefines(std::string defs);
         void setIncludePaths(const std::string &basepath, const std::list<std::string> &in, std::map<std::string, std::string, cppcheck::stricmp> &variables);
     };
     std::list<FileSettings> fileSettings;
+    Type projectType;
+
+    ImportProject();
 
     void selectOneVsConfig(cppcheck::Platform::PlatformType platform);
 
@@ -106,8 +115,8 @@ protected:
     void importCompileCommands(std::istream &istr);
     bool importCppcheckGuiProject(std::istream &istr, Settings *settings);
 private:
-    void importSln(std::istream &istr, const std::string &path);
-    void importVcxproj(const std::string &filename, std::map<std::string, std::string, cppcheck::stricmp> &variables, const std::string &additionalIncludeDirectories);
+    void importSln(std::istream &istr, const std::string &path, const std::string &fileFilter);
+    void importVcxproj(const std::string &filename, std::map<std::string, std::string, cppcheck::stricmp> &variables, const std::string &additionalIncludeDirectories, const std::string &fileFilter);
     void importBcb6Prj(const std::string &projectFilename);
 
     std::string mPath;
@@ -143,6 +152,15 @@ namespace CppcheckXml {
     const char ExcludeElementName[] = "exclude";
     const char ExcludePathName[] = "path";
     const char ExcludePathNameAttrib[] = "name";
+    const char FunctionContracts[] = "function-contracts";
+    const char FunctionContract[] = "contract";
+    const char ContractFunction[] = "function";
+    const char ContractExpects[] = "expects";
+    const char VariableContractsElementName[] = "variable-contracts";
+    const char VariableContractItemElementName[] = "var";
+    const char VariableContractVarName[] = "name";
+    const char VariableContractMin[] = "min";
+    const char VariableContractMax[] = "max";
     const char LibrariesElementName[] = "libraries";
     const char LibraryElementName[] = "library";
     const char PlatformElementName[] = "platform";
@@ -154,9 +172,14 @@ namespace CppcheckXml {
     const char ToolsElementName[] = "tools";
     const char TagsElementName[] = "tags";
     const char TagElementName[] = "tag";
+    const char TagWarningsElementName[] = "tag-warnings";
+    const char TagAttributeName[] = "tag";
+    const char WarningElementName[] = "warning";
+    const char HashAttributeName[] = "hash";
     const char CheckHeadersElementName[] = "check-headers";
     const char CheckUnusedTemplatesElementName[] = "check-unused-templates";
     const char MaxCtuDepthElementName[] = "max-ctu-depth";
+    const char MaxTemplateRecursionElementName[] = "max-template-recursion";
     const char CheckUnknownFunctionReturn[] = "check-unknown-function-return-values";
     const char ClangTidy[] = "clang-tidy";
     const char Name[] = "name";

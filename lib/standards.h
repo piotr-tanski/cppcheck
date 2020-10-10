@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -38,10 +38,14 @@ struct Standards {
     /** C++ code standard */
     enum cppstd_t { CPP03, CPP11, CPP14, CPP17, CPP20, CPPLatest=CPP20 } cpp;
 
+    /** --std value given on command line */
+    std::string stdValue;
+
     /** This constructor clear all the variables **/
     Standards() : c(C11), cpp(CPPLatest) {}
 
     bool setC(const std::string& str) {
+        stdValue = str;
         if (str == "c89" || str == "C89") {
             c = C89;
             return true;
@@ -68,6 +72,7 @@ struct Standards {
         return "";
     }
     bool setCPP(const std::string& str) {
+        stdValue = str;
         if (str == "c++03" || str == "C++03") {
             cpp = CPP03;
             return true;
@@ -90,7 +95,7 @@ struct Standards {
         }
         return false;
     }
-    const std::string getCPP() const {
+    std::string getCPP() const {
         switch (cpp) {
         case CPP03:
             return "c++03";

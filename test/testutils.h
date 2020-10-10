@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -53,7 +53,7 @@ public:
     void reportOut(const std::string &outmsg) OVERRIDE {
         next->reportOut(outmsg);
     }
-    void reportErr(const ErrorLogger::ErrorMessage &msg) OVERRIDE {
+    void reportErr(const ErrorMessage &msg) OVERRIDE {
         if (!msg.callStack.empty() && !settings.nomsg.isSuppressed(msg.toSuppressionsErrorMessage()))
             next->reportErr(msg);
     }

@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -393,6 +393,13 @@ private:
               "   if (example.buffer == \"test\") ;\n"
               "}\n", "test.c");
         ASSERT_EQUALS("[test.c:6]: (warning) String literal compared with variable 'example.buffer'. Did you intend to use strcmp() instead?\n", errout.str());
+
+        // #9726
+        check("void f(std::vector<std::string> theArgs) {\n"
+              "   std::string arg1(*theArgs.begin());\n"
+              "   if(arg1 == \"aaa\") {}\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
     }
 
     void suspiciousStringCompare_char() {

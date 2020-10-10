@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2018 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -160,6 +160,12 @@ void CheckExceptionSafety::checkRethrowCopy()
                 if (Token::simpleMatch(tok, "catch (") && tok->next()->link() && tok->next()->link()->next()) { // Don't check inner catch - it is handled in another iteration of outer loop.
                     tok = tok->next()->link()->next()->link();
                     if (!tok)
+                        break;
+                } else if (Token::Match(tok, "%varid% .", varid)) {
+                    const Token *parent = tok->astParent();
+                    while (Token::simpleMatch(parent->astParent(), "."))
+                        parent = parent->astParent();
+                    if (Token::Match(parent->astParent(), "%assign%|++|--|(") && parent == parent->astParent()->astOperand1())
                         break;
                 } else if (Token::Match(tok, "throw %varid% ;", varid))
                     rethrowCopyError(tok, tok->strAt(1));

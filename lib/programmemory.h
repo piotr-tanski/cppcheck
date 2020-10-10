@@ -3,19 +3,24 @@
 
 #include "config.h"
 #include "utils.h"
-#include "valueflow.h"
+#include "valueflow.h" // needed for alias
 #include "mathlib.h"
 #include <map>
 #include <unordered_map>
+
+class Token;
 
 struct ProgramMemory {
     using Map = std::unordered_map<nonneg int, ValueFlow::Value>;
     Map values;
 
     void setValue(nonneg int varid, const ValueFlow::Value &value);
+    const ValueFlow::Value* getValue(nonneg int varid) const;
 
     bool getIntValue(nonneg int varid, MathLib::bigint* result) const;
     void setIntValue(nonneg int varid, MathLib::bigint value);
+
+    bool getContainerSizeValue(nonneg int varid, MathLib::bigint* result) const;
 
     void setUnknown(nonneg int varid);
 

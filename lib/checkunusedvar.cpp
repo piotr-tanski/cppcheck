@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
 #include "checkunusedvar.h"
 
 #include "astutils.h"
-#include "errorlogger.h"
+#include "preprocessor.h"
 #include "settings.h"
 #include "symboldatabase.h"
 #include "token.h"
@@ -45,6 +45,53 @@ namespace {
 static const struct CWE CWE563(563U);   // Assignment to Variable without Use ('Unused Variable')
 static const struct CWE CWE665(665U);   // Improper Initialization
 
+/** Is scope a raii class scope */
+static bool isRaiiClassScope(const Scope *classScope)
+{
+    return classScope && classScope->getDestructor() != nullptr;
+}
+
+/** Is ValueType a raii class? */
+static bool isRaiiClass(const ValueType *valueType, bool cpp, bool defaultReturn = true)
+{
+    if (!cpp)
+        return false;
+
+    if (!valueType)
+        return defaultReturn;
+
+    if (valueType->smartPointerType && isRaiiClassScope(valueType->smartPointerType->classScope))
+        return true;
+
+    switch (valueType->type) {
+    case ValueType::Type::UNKNOWN_TYPE:
+    case ValueType::Type::NONSTD:
+        return defaultReturn;
+
+    case ValueType::Type::RECORD:
+        if (isRaiiClassScope(valueType->typeScope))
+            return true;
+        return defaultReturn;
+
+    case ValueType::Type::CONTAINER:
+    case ValueType::Type::ITERATOR:
+    case ValueType::Type::VOID:
+    case ValueType::Type::BOOL:
+    case ValueType::Type::CHAR:
+    case ValueType::Type::SHORT:
+    case ValueType::Type::WCHAR_T:
+    case ValueType::Type::INT:
+    case ValueType::Type::LONG:
+    case ValueType::Type::LONGLONG:
+    case ValueType::Type::UNKNOWN_INT:
+    case ValueType::Type::FLOAT:
+    case ValueType::Type::DOUBLE:
+    case ValueType::Type::LONGDOUBLE:
+        return false;
+    }
+
+    return defaultReturn;
+}
 
 /**
  * @brief This class is used create a list of variables within a function.
@@ -245,8 +292,8 @@ void Variables::readAliases(unsigned int varid, const Token* tok)
     VariableUsage *usage = find(varid);
 
     if (usage) {
-        for (std::set<unsigned int>::iterator aliases = usage->_aliases.begin(); aliases != usage->_aliases.end(); ++aliases) {
-            VariableUsage *aliased = find(*aliases);
+        for (unsigned int aliases : usage->_aliases) {
+            VariableUsage *aliased = find(aliases);
 
             if (aliased) {
                 aliased->_read = true;
@@ -592,6 +639,11 @@ static bool isPartOfClassStructUnion(const Token* tok)
         }
     }
     return false;
+}
+
+static bool isVarDecl(const Token *tok)
+{
+    return tok && tok->variable() && tok->variable()->nameToken() == tok;
 }
 
 // Skip [ .. ]
@@ -1047,11 +1099,11 @@ void CheckUnusedVar::checkFunctionVariableUsage_iterateScopes(const Scope* const
                 variables.use(tok->astOperand2()->varId(), tok->astOperand2());
         }
 
-        else if (tok->isExtendedOp() && tok->next() && tok->next()->varId() && tok->strAt(2) != "=") {
+        else if (tok->isExtendedOp() && tok->next() && tok->next()->varId() && tok->strAt(2) != "=" && !isVarDecl(tok->next())) {
             variables.readAll(tok->next()->varId(), tok);
         }
 
-        else if (tok->varId() && tok->next() && (tok->next()->str() == ")" || tok->next()->isExtendedOp())) {
+        else if (tok->varId() && !isVarDecl(tok) && tok->next() && (tok->next()->str() == ")" || tok->next()->isExtendedOp())) {
             if (Token::Match(tok->tokAt(-2), "%name% ( %var% [,)]") &&
                 !(tok->tokAt(-2)->variable() && tok->tokAt(-2)->variable()->isReference()))
                 variables.use(tok->varId(), tok);
@@ -1127,38 +1179,16 @@ void CheckUnusedVar::checkFunctionVariableUsage()
             const bool isIncrementOrDecrement = (tok->tokType() == Token::Type::eIncDecOp);
             if (!isAssignment && !isInitialization && !isIncrementOrDecrement)
                 continue;
+
+            if (isIncrementOrDecrement && tok->astParent() && precedes(tok, tok->astOperand1()))
+                continue;
+
+            if (tok->str() == "=" && isRaiiClass(tok->valueType(), mTokenizer->isCPP(), false))
+                continue;
+
             if (tok->isName()) {
-                if (mTokenizer->isCPP()) {
-                    // do not check RAII/scope_lock objects
-                    if (!tok->valueType())
-                        continue;
-                    bool check = false;
-                    switch (tok->valueType()->type) {
-                    case ValueType::Type::UNKNOWN_TYPE:
-                    case ValueType::Type::NONSTD:
-                    case ValueType::Type::RECORD:
-                        check = tok->valueType()->typeScope && !tok->valueType()->typeScope->getDestructor();
-                        break;
-                    case ValueType::Type::CONTAINER:
-                    case ValueType::Type::ITERATOR:
-                    case ValueType::Type::VOID:
-                    case ValueType::Type::BOOL:
-                    case ValueType::Type::CHAR:
-                    case ValueType::Type::SHORT:
-                    case ValueType::Type::WCHAR_T:
-                    case ValueType::Type::INT:
-                    case ValueType::Type::LONG:
-                    case ValueType::Type::LONGLONG:
-                    case ValueType::Type::UNKNOWN_INT:
-                    case ValueType::Type::FLOAT:
-                    case ValueType::Type::DOUBLE:
-                    case ValueType::Type::LONGDOUBLE:
-                        check = true;
-                        break;
-                    };
-                    if (!check)
-                        continue;
-                }
+                if (isRaiiClass(tok->valueType(), mTokenizer->isCPP(), true))
+                    continue;
                 tok = tok->next();
             }
             if (tok->astParent() && tok->str() != "(") {
@@ -1201,6 +1231,10 @@ void CheckUnusedVar::checkFunctionVariableUsage()
                 if (op1Var->nameToken()->isAttributeUnused())
                     continue;
 
+                // Avoid FP for union..
+                if (op1Var->type() && op1Var->type()->isUnionType())
+                    continue;
+
                 // Bailout for unknown template classes, we have no idea what side effects such assignments have
                 if (mTokenizer->isCPP() &&
                     op1Var->isClass() &&
@@ -1215,7 +1249,7 @@ void CheckUnusedVar::checkFunctionVariableUsage()
                         break;
                     case Library::TypeCheck::suppress:
                         continue;
-                    };
+                    }
                 }
             }
 
@@ -1223,6 +1257,9 @@ void CheckUnusedVar::checkFunctionVariableUsage()
             const Token *start = tok->findExpressionStartEndTokens().second->next();
 
             const Token *expr = varDecl ? varDecl : tok->astOperand1();
+
+            if (isInitialization)
+                expr = tok->previous();
 
             // Is variable in lhs a union member?
             if (tok->previous() && tok->previous()->variable() && tok->previous()->variable()->nameToken()->scope()->type == Scope::eUnion)
@@ -1241,7 +1278,8 @@ void CheckUnusedVar::checkFunctionVariableUsage()
                 }
 
                 // warn
-                unreadVariableError(tok, expr->expressionString(), false);
+                if (!expr->variable() || !expr->variable()->isMaybeUnused())
+                    unreadVariableError(tok, expr->expressionString(), false);
             }
         }
 
@@ -1276,9 +1314,11 @@ void CheckUnusedVar::checkFunctionVariableUsage()
                 allocatedButUnusedVariableError(usage._lastAccess, varname);
 
             // variable has not been written, read, or modified
-            else if (usage.unused() && !usage._modified)
-                unusedVariableError(usage._var->nameToken(), varname);
-
+            else if (usage.unused() && !usage._modified) {
+                if (!usage._var->isMaybeUnused()) {
+                    unusedVariableError(usage._var->nameToken(), varname);
+                }
+            }
             // variable has not been written but has been modified
             else if (usage._modified && !usage._write && !usage._allocateMemory && var && !var->isStlType())
                 unassignedVariableError(usage._var->nameToken(), varname);
@@ -1333,6 +1373,17 @@ void CheckUnusedVar::checkStructMemberUsage()
         // Packed struct => possibly used by lowlevel code. Struct members might be required by hardware.
         if (scope.bodyEnd->isAttributePacked())
             continue;
+        if (const Preprocessor *preprocessor = mTokenizer->getPreprocessor()) {
+            bool isPacked = false;
+            for (const Directive &d: preprocessor->getDirectives()) {
+                if (d.str == "#pragma pack(1)" && d.file == mTokenizer->list.getFiles().front() && d.linenr < scope.bodyStart->linenr()) {
+                    isPacked=true;
+                    break;
+                }
+            }
+            if (isPacked)
+                continue;
+        }
 
         // Bail out if struct/union contains any functions
         if (!scope.functionList.empty())
@@ -1398,7 +1449,11 @@ void CheckUnusedVar::checkStructMemberUsage()
                 continue;
 
             // Check if the struct member variable is used anywhere in the file
-            if (Token::findsimplematch(mTokenizer->tokens(), (". " + var.name()).c_str()))
+            std::string tmp(". " + var.name());
+            if (Token::findsimplematch(mTokenizer->tokens(), tmp.c_str(), tmp.size()))
+                continue;
+            tmp = (":: " + var.name());
+            if (Token::findsimplematch(mTokenizer->tokens(), tmp.c_str(), tmp.size()))
                 continue;
 
             unusedStructMemberError(var.nameToken(), scope.className, var.name(), scope.type == Scope::eUnion);
@@ -1419,24 +1474,50 @@ bool CheckUnusedVar::isRecordTypeWithoutSideEffects(const Type* type)
 
     const std::pair<std::map<const Type *,bool>::iterator,bool> found=mIsRecordTypeWithoutSideEffectsMap.insert(
                 std::pair<const Type *,bool>(type,false)); //Initialize with side effects for possible recursions
-    bool & withoutSideEffects=found.first->second;
+    bool & withoutSideEffects = found.first->second;
     if (!found.second)
         return withoutSideEffects;
 
-    if (type && type->classScope && type->classScope->numConstructors == 0 &&
-        (type->classScope->varlist.empty() || type->needInitialization == Type::NeedInitialization::True)) {
-        for (std::vector<Type::BaseInfo>::const_iterator i = type->derivedFrom.begin(); i != type->derivedFrom.end(); ++i) {
-            if (!isRecordTypeWithoutSideEffects(i->type)) {
-                withoutSideEffects=false;
-                return withoutSideEffects;
-            }
-        }
-        withoutSideEffects=true;
-        return withoutSideEffects;
+    // unknown types are assumed to have side effects
+    if (!type || !type->classScope)
+        return (withoutSideEffects = false);
+
+    // Non-empty constructors => possible side effects
+    for (const Function& f : type->classScope->functionList) {
+        if (!f.isConstructor())
+            continue;
+        if (f.argDef && Token::simpleMatch(f.argDef->link(), ") ="))
+            continue; // ignore default/deleted constructors
+        const bool emptyBody = (f.functionScope && Token::simpleMatch(f.functionScope->bodyStart, "{ }"));
+        const bool hasInitList = f.argDef && Token::simpleMatch(f.argDef->link(), ") :");
+        if (!emptyBody || hasInitList)
+            return (withoutSideEffects = false);
     }
 
-    withoutSideEffects=false;   // unknown types are assumed to have side effects
-    return withoutSideEffects;
+    // Derived from type that has side effects?
+    for (const Type::BaseInfo& derivedFrom : type->derivedFrom) {
+        if (!isRecordTypeWithoutSideEffects(derivedFrom.type))
+            return (withoutSideEffects = false);
+    }
+
+    // Is there a member variable with possible side effects
+    for (const Variable& var : type->classScope->varlist) {
+        if (var.isPointer())
+            continue;
+
+        const Type* variableType = var.type();
+        if (variableType) {
+            if (!isRecordTypeWithoutSideEffects(variableType))
+                return (withoutSideEffects = false);
+        } else {
+            ValueType::Type valueType = var.valueType()->type;
+            if ((valueType == ValueType::Type::UNKNOWN_TYPE) || (valueType == ValueType::Type::NONSTD))
+                return (withoutSideEffects = false);
+        }
+    }
+
+
+    return (withoutSideEffects = true);
 }
 
 bool CheckUnusedVar::isEmptyType(const Type* type)

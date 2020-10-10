@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -31,14 +31,18 @@
 #include "tokenize.h"
 #include "valueflow.h"
 
-#include <tinyxml2.h>
-
 #include <cassert>
 #include <cstddef>
 #include <list>
 #include <map>
 #include <stack>
 #include <utility>
+
+
+namespace tinyxml2 {
+    class XMLElement;
+}
+
 //---------------------------------------------------------------------------
 
 // Register this check class (by creating a static instance of it)
@@ -169,15 +173,18 @@ void CheckUninitVar::checkScope(const Scope* scope, const std::set<std::string> 
             if (arg.declarationId() && Token::Match(arg.typeStartToken(), "%type% * %name% [,)]")) {
                 // Treat the pointer as initialized until it is assigned by malloc
                 for (const Token *tok = scope->bodyStart; tok != scope->bodyEnd; tok = tok->next()) {
-                    if (Token::Match(tok, "[;{}] %varid% = %name% (", arg.declarationId()) &&
-                        mSettings->library.returnuninitdata.count(tok->strAt(3)) == 1U) {
-                        if (arg.typeStartToken()->strAt(-1) == "struct" || (arg.type() && arg.type()->isStructType()))
-                            checkStruct(tok, arg);
-                        else if (arg.typeStartToken()->isStandardType() || arg.typeStartToken()->isEnumType()) {
-                            Alloc alloc = NO_ALLOC;
-                            const std::map<int, VariableValue> variableValue;
-                            checkScopeForVariable(tok->next(), arg, nullptr, nullptr, &alloc, emptyString, variableValue);
-                        }
+                    if (!Token::Match(tok, "[;{}] %varid% = %name% (", arg.declarationId()))
+                        continue;
+                    const Library::AllocFunc *allocFunc = mSettings->library.getAllocFuncInfo(tok->tokAt(3));
+                    if (!allocFunc || allocFunc->initData)
+                        continue;
+
+                    if (arg.typeStartToken()->strAt(-1) == "struct" || (arg.type() && arg.type()->isStructType()))
+                        checkStruct(tok, arg);
+                    else if (arg.typeStartToken()->isStandardType() || arg.typeStartToken()->isEnumType()) {
+                        Alloc alloc = NO_ALLOC;
+                        const std::map<int, VariableValue> variableValue;
+                        checkScopeForVariable(tok->next(), arg, nullptr, nullptr, &alloc, emptyString, variableValue);
                     }
                 }
             }
@@ -431,20 +438,18 @@ bool CheckUninitVar::checkScopeForVariable(const Token *tok, const Variable& var
                 const Token *condition = tok->next()->astOperand2();
                 const Token *lhs = condition->astOperand1();
                 const Token *rhs = condition->astOperand2();
-                const Token *vartok = rhs && rhs->isNumber() ? lhs : rhs;
-                const Token *numtok = rhs && rhs->isNumber() ? rhs : lhs;
+                const Token *vartok = (lhs && lhs->hasKnownIntValue()) ? rhs : lhs;
+                const Token *numtok = (lhs == vartok) ? rhs : lhs;
                 while (Token::simpleMatch(vartok, "."))
                     vartok = vartok->astOperand2();
-                if (vartok && vartok->varId() && numtok) {
+                if (vartok && vartok->varId() && numtok && numtok->hasKnownIntValue()) {
                     const std::map<int,VariableValue>::const_iterator it = variableValue.find(vartok->varId());
-                    if (it != variableValue.end() && it->second != MathLib::toLongNumber(numtok->str()))
+                    if (it != variableValue.end() && it->second != numtok->getKnownIntValue())
                         return true;   // this scope is not fully analysed => return true
-                    else {
-                        condVarId = vartok->varId();
-                        condVarValue = VariableValue(MathLib::toLongNumber(numtok->str()));
-                        if (condition->str() == "!=")
-                            condVarValue = !condVarValue;
-                    }
+                    condVarId = vartok->varId();
+                    condVarValue = VariableValue(numtok->getKnownIntValue());
+                    if (condition->str() == "!=")
+                        condVarValue = !condVarValue;
                 }
             }
 
@@ -714,10 +719,12 @@ bool CheckUninitVar::checkScopeForVariable(const Token *tok, const Variable& var
                 const Token *rhs = tok->next()->astOperand2();
                 while (rhs && rhs->isCast())
                     rhs = rhs->astOperand2() ? rhs->astOperand2() : rhs->astOperand1();
-                if (rhs && Token::Match(rhs->previous(), "%name% (") &&
-                    mSettings->library.returnuninitdata.count(rhs->previous()->str()) > 0U) {
-                    *alloc = NO_CTOR_CALL;
-                    continue;
+                if (rhs && Token::Match(rhs->previous(), "%name% (")) {
+                    const Library::AllocFunc *allocFunc = mSettings->library.getAllocFuncInfo(rhs->astOperand1());
+                    if (allocFunc && !allocFunc->initData) {
+                        *alloc = NO_CTOR_CALL;
+                        continue;
+                    }
                 }
             }
             if (mTokenizer->isCPP() && var.isPointer() && (var.typeStartToken()->isStandardType() || var.typeStartToken()->isEnumType() || (var.type() && var.type()->needInitialization == Type::NeedInitialization::True)) && Token::simpleMatch(tok->next(), "= new")) {
@@ -874,22 +881,17 @@ bool CheckUninitVar::checkLoopBody(const Token *tok, const Variable& var, const 
                 usetok = tok;
             else if (tok->strAt(1) == "=") {
                 bool varIsUsedInRhs = false;
-                std::stack<const Token *> tokens;
-                tokens.push(tok->next()->astOperand2());
-                while (!tokens.empty()) {
-                    const Token *t = tokens.top();
-                    tokens.pop();
+                visitAstNodes(tok->next()->astOperand2(), [&](const Token * t) {
                     if (!t)
-                        continue;
+                        return ChildrenToVisit::none;
                     if (t->varId() == var.declarationId()) {
                         varIsUsedInRhs = true;
-                        break;
+                        return ChildrenToVisit::done;
                     }
                     if (Token::simpleMatch(t->previous(),"sizeof ("))
-                        continue;
-                    tokens.push(t->astOperand1());
-                    tokens.push(t->astOperand2());
-                }
+                        return ChildrenToVisit::none;
+                    return ChildrenToVisit::op1_and_op2;
+                });
                 if (!varIsUsedInRhs)
                     return true;
             } else {
@@ -922,6 +924,8 @@ void CheckUninitVar::checkRhs(const Token *tok, const Variable &var, Alloc alloc
             else if (!membervar.empty() && isMemberVariableUsage(tok, var.isPointer(), alloc, membervar))
                 uninitStructMemberError(tok, tok->str() + "." + membervar);
             else if (Token::Match(tok, "%var% ="))
+                break;
+            else if (Token::Match(tok->previous(), "[(,&]"))
                 break;
         } else if (tok->str() == ";" || (indent==0 && tok->str() == ","))
             break;
@@ -1108,6 +1112,10 @@ bool CheckUninitVar::isVariableUsage(const Token *vartok, bool pointer, Alloc al
     if (vartok->strAt(1) == "]")
         return true;
 
+    const Token *astParent = vartok->astParent();
+    if (astParent && (astParent->tokType() == Token::Type::eBitOp) && (astParent->isBinaryOp()))
+        return true;
+
     return false;
 }
 
@@ -1175,9 +1183,10 @@ int CheckUninitVar::isFunctionParUsage(const Token *vartok, bool pointer, Alloc 
             const bool isnullbad = mSettings->library.isnullargbad(start->previous(), argumentNumber + 1);
             if (indirect == 0 && pointer && !address && isnullbad && alloc == NO_ALLOC)
                 return 1;
-            const bool isuninitbad = mSettings->library.isuninitargbad(start->previous(), argumentNumber + 1, indirect);
+            bool hasIndirect = false;
+            const bool isuninitbad = mSettings->library.isuninitargbad(start->previous(), argumentNumber + 1, indirect, &hasIndirect);
             if (alloc != NO_ALLOC)
-                return isnullbad && isuninitbad;
+                return (isnullbad || hasIndirect) && isuninitbad;
             return isuninitbad && (!address || isnullbad);
         }
     }
@@ -1436,7 +1445,7 @@ bool CheckUninitVar::analyseWholeProgram(const CTU::FileInfo *ctu, const std::li
         for (const CTU::FileInfo::UnsafeUsage &unsafeUsage : fi->unsafeUsage) {
             const CTU::FileInfo::FunctionCall *functionCall = nullptr;
 
-            const std::list<ErrorLogger::ErrorMessage::FileLocation> &locationList =
+            const std::list<ErrorMessage::FileLocation> &locationList =
                 ctu->getErrorPath(CTU::FileInfo::InvalidValueType::uninit,
                                   unsafeUsage,
                                   callsMap,
@@ -1446,13 +1455,13 @@ bool CheckUninitVar::analyseWholeProgram(const CTU::FileInfo *ctu, const std::li
             if (locationList.empty())
                 continue;
 
-            const ErrorLogger::ErrorMessage errmsg(locationList,
-                                                   emptyString,
-                                                   Severity::error,
-                                                   "Using argument " + unsafeUsage.myArgumentName + " that points at uninitialized variable " + functionCall->callArgumentExpression,
-                                                   "ctuuninitvar",
-                                                   CWE_USE_OF_UNINITIALIZED_VARIABLE,
-                                                   false);
+            const ErrorMessage errmsg(locationList,
+                                      emptyString,
+                                      Severity::error,
+                                      "Using argument " + unsafeUsage.myArgumentName + " that points at uninitialized variable " + functionCall->callArgumentExpression,
+                                      "ctuuninitvar",
+                                      CWE_USE_OF_UNINITIALIZED_VARIABLE,
+                                      false);
             errorLogger.reportErr(errmsg);
 
             foundErrors = true;

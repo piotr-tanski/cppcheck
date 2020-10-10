@@ -9,6 +9,7 @@
 
 #include <wx/wx.h>
 #include <wx/app.h>
+#include <wx/dc.h>
 #include <wx/log.h>
 #include <wx/filefn.h>
 #include <wx/spinctrl.h>
@@ -26,6 +27,42 @@
 #include <wx/string.h>
 #include <wx/textctrl.h>
 #include <wx/propgrid/property.h>
+
+wxString containerOutOfBounds_wxArrayString(void)
+{
+    wxArrayString a;
+    a.Add("42");
+    a.Clear();
+    // TODO: wxArrayString is defined to be a vector
+    // TODO: cppcheck-suppress containerOutOfBounds
+    return a[0];
+}
+
+int containerOutOfBounds_wxArrayInt(void)
+{
+    wxArrayInt a;
+    a.Add(42);
+    a.Clear();
+    // TODO: wxArrayString is defined to be a vector
+    // TODO: cppcheck-suppress containerOutOfBounds
+    return a[0];
+}
+
+void ignoredReturnValue_wxDC_GetSize(const wxDC &dc, wxCoord *width, wxCoord *height)
+{
+    // No warning is expected for
+    dc.GetSize(width, height);
+    // No warning is expected for
+    (void)dc.GetSize();
+}
+
+void ignoredReturnValue_wxDC_GetSizeMM(const wxDC &dc, wxCoord *width, wxCoord *height)
+{
+    // No warning is expected for
+    dc.GetSizeMM(width, height);
+    // Now warning is expected for
+    (void)dc.GetSizeMM();
+}
 
 wxSizerItem* invalidFunctionArgBool_wxSizer_Add(wxSizer *sizer, wxWindow * window, const wxSizerFlags &flags)
 {

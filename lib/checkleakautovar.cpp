@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,13 +25,12 @@
 #include "astutils.h"
 #include "checkmemoryleak.h"  // <- CheckMemoryLeak::memoryLeak
 #include "checknullpointer.h" // <- CheckNullPointer::isPointerDeRef
-#include "errorlogger.h"
 #include "mathlib.h"
 #include "settings.h"
+#include "errortypes.h"
 #include "symboldatabase.h"
 #include "token.h"
 #include "tokenize.h"
-#include "valueflow.h"
 
 #include <cstddef>
 #include <iostream>
@@ -105,7 +104,7 @@ void VarInfo::print()
         default:
             status = "?";
             break;
-        };
+        }
 
         std::cout << "status=" << status << " "
                   << "alloctype='" << it->second.type << "' "
@@ -464,23 +463,21 @@ void CheckLeakAutoVar::checkScope(const Token * const startToken,
                 VarInfo varInfo1(*varInfo);  // VarInfo for if code
                 VarInfo varInfo2(*varInfo);  // VarInfo for else code
 
+                // Skip expressions before commas
+                const Token * astOperand2AfterCommas = tok->next()->astOperand2();
+                while (Token::simpleMatch(astOperand2AfterCommas, ","))
+                    astOperand2AfterCommas = astOperand2AfterCommas->astOperand2();
+
                 // Recursively scan variable comparisons in condition
-                std::stack<const Token *> tokens;
-                tokens.push(tok->next()->astOperand2());
-                while (!tokens.empty()) {
-                    const Token *tok3 = tokens.top();
-                    tokens.pop();
+                visitAstNodes(astOperand2AfterCommas, [&](const Token *tok3) {
                     if (!tok3)
-                        continue;
+                        return ChildrenToVisit::none;
                     if (tok3->str() == "&&" || tok3->str() == "||") {
                         // FIXME: handle && ! || better
-                        tokens.push(tok3->astOperand1());
-                        tokens.push(tok3->astOperand2());
-                        continue;
+                        return ChildrenToVisit::op1_and_op2;
                     }
                     if (tok3->str() == "(" && Token::Match(tok3->astOperand1(), "UNLIKELY|LIKELY")) {
-                        tokens.push(tok3->astOperand2());
-                        continue;
+                        return ChildrenToVisit::op2;
                     } else if (tok3->str() == "(" && Token::Match(tok3->previous(), "%name%")) {
                         const std::vector<const Token *> params = getArguments(tok3->previous());
                         for (const Token *par : params) {
@@ -497,7 +494,7 @@ void CheckLeakAutoVar::checkScope(const Token * const startToken,
                                 varInfo2.erase(vartok->varId());
                             }
                         }
-                        continue;
+                        return ChildrenToVisit::none;
                     }
 
                     const Token *vartok = nullptr;
@@ -514,7 +511,8 @@ void CheckLeakAutoVar::checkScope(const Token * const startToken,
                     } else if (astIsVariableComparison(tok3, "==", "-1", &vartok)) {
                         varInfo1.erase(vartok->varId());
                     }
-                }
+                    return ChildrenToVisit::none;
+                });
 
                 checkScope(closingParenthesis->next(), &varInfo1, notzero, recursiveCount);
                 closingParenthesis = closingParenthesis->linkAt(1);
@@ -857,7 +855,8 @@ void CheckLeakAutoVar::functionCall(const Token *tokName, const Token *tokOpenin
     }
 
     int argNr = 1;
-    for (const Token *arg = tokFirstArg; arg; arg = arg->nextArgument()) {
+    for (const Token *funcArg = tokFirstArg; funcArg; funcArg = funcArg->nextArgument()) {
+        const Token* arg = funcArg;
         if (mTokenizer->isCPP() && arg->str() == "new") {
             arg = arg->next();
             if (Token::simpleMatch(arg, "( std :: nothrow )"))

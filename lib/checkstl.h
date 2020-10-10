@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,17 +24,18 @@
 
 #include "check.h"
 #include "config.h"
-#include "library.h"
+#include "errortypes.h"
 #include "tokenize.h"
+#include "utils.h"
+#include "valueflow.h"
 
-#include <map>
 #include <string>
 
-class ErrorLogger;
 class Scope;
 class Settings;
 class Token;
 class Variable;
+class ErrorLogger;
 
 
 /// @addtogroup Checks
@@ -77,10 +78,15 @@ public:
         checkStl.negativeIndex();
 
         checkStl.invalidContainer();
+        checkStl.invalidContainerLoop();
         checkStl.mismatchingContainers();
+        checkStl.mismatchingContainerIterator();
+        checkStl.knownEmptyContainer();
 
         checkStl.stlBoundaries();
         checkStl.checkDereferenceInvalidIterator();
+        checkStl.checkDereferenceInvalidIterator2();
+        checkStl.checkMutexes();
 
         // Style check
         checkStl.size();
@@ -111,6 +117,8 @@ public:
 
     void invalidContainer();
 
+    void invalidContainerLoop();
+
     bool checkIteratorPair(const Token* tok1, const Token* tok2);
 
     /**
@@ -118,6 +126,8 @@ public:
      * std::find(foo.begin(), bar.end(), x)
      */
     void mismatchingContainers();
+
+    void mismatchingContainerIterator();
 
     /**
      * Dangerous usage of erase. The iterator is invalidated by erase so
@@ -163,6 +173,7 @@ public:
 
     /** @brief %Check for dereferencing an iterator that is invalid */
     void checkDereferenceInvalidIterator();
+    void checkDereferenceInvalidIterator2();
 
     /**
      * Dereferencing an erased iterator
@@ -178,6 +189,10 @@ public:
 
     /** @brief Look for loops that can replaced with std algorithms */
     void useStlAlgorithm();
+
+    void knownEmptyContainer();
+
+    void checkMutexes();
 
 private:
     bool isContainerSize(const Token *containerToken, const Token *expr) const;
@@ -197,6 +212,7 @@ private:
     void iteratorsError(const Token* tok, const std::string& containerName1, const std::string& containerName2);
     void iteratorsError(const Token* tok, const Token* containerTok, const std::string& containerName1, const std::string& containerName2);
     void iteratorsError(const Token* tok, const Token* containerTok, const std::string& containerName);
+    void mismatchingContainerIteratorError(const Token* tok, const Token* iterTok);
     void mismatchingContainersError(const Token* tok1, const Token* tok2);
     void mismatchingContainerExpressionError(const Token *tok1, const Token *tok2);
     void sameIteratorExpressionError(const Token *tok);
@@ -205,6 +221,7 @@ private:
     void checkFindInsertError(const Token *tok);
     void sizeError(const Token* tok);
     void redundantIfRemoveError(const Token* tok);
+    void invalidContainerLoopError(const Token *tok, const Token * loopTok);
     void invalidContainerError(const Token *tok, const Token * contTok, const ValueFlow::Value *val, ErrorPath errorPath);
     void invalidContainerReferenceError(const Token* tok, const Token* contTok, ErrorPath errorPath);
 
@@ -215,10 +232,16 @@ private:
     void uselessCallsRemoveError(const Token* tok, const std::string& function);
 
     void dereferenceInvalidIteratorError(const Token* deref, const std::string& iterName);
+    void dereferenceInvalidIteratorError(const Token* tok, const ValueFlow::Value *value, bool inconclusive);
 
     void readingEmptyStlContainerError(const Token* tok, const ValueFlow::Value *value=nullptr);
 
     void useStlAlgorithmError(const Token *tok, const std::string &algoName);
+
+    void knownEmptyContainerError(const Token *tok, const std::string& algo);
+
+    void globalLockGuardError(const Token *tok);
+    void localMutexError(const Token *tok);
 
     void getErrorMessages(ErrorLogger* errorLogger, const Settings* settings) const OVERRIDE {
         ErrorPath errorPath;
@@ -228,7 +251,9 @@ private:
         c.iteratorsError(nullptr, "container1", "container2");
         c.iteratorsError(nullptr, nullptr, "container0", "container1");
         c.iteratorsError(nullptr, nullptr, "container");
+        c.invalidContainerLoopError(nullptr, nullptr);
         c.invalidContainerError(nullptr, nullptr, nullptr, errorPath);
+        c.mismatchingContainerIteratorError(nullptr, nullptr);
         c.mismatchingContainersError(nullptr, nullptr);
         c.mismatchingContainerExpressionError(nullptr, nullptr);
         c.sameIteratorExpressionError(nullptr);
@@ -254,6 +279,9 @@ private:
         c.dereferenceInvalidIteratorError(nullptr, "i");
         c.readingEmptyStlContainerError(nullptr);
         c.useStlAlgorithmError(nullptr, "");
+        c.knownEmptyContainerError(nullptr, "");
+        c.globalLockGuardError(nullptr);
+        c.localMutexError(nullptr);
     }
 
     static std::string myName() {
@@ -276,7 +304,9 @@ private:
                "- useless calls of string and STL functions\n"
                "- dereferencing an invalid iterator\n"
                "- reading from empty STL container\n"
-               "- consider using an STL algorithm instead of raw loop\n";
+               "- iterating over an empty STL container\n"
+               "- consider using an STL algorithm instead of raw loop\n"
+               "- incorrect locking with mutex\n";
     }
 };
 /// @}

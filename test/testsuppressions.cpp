@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,7 +22,6 @@
 #include "suppressions.h"
 #include "testsuite.h"
 #include "threadexecutor.h"
-#include "path.h"
 
 #include <cstddef>
 #include <list>
@@ -64,7 +63,7 @@ private:
         TEST_CASE(suppressionWithRelativePaths); // #4733
         TEST_CASE(suppressingSyntaxErrors); // #7076
         TEST_CASE(suppressingSyntaxErrorsInline); // #5917
-        TEST_CASE(suppressingSyntaxErrorsWhileFileRead) // PR #1333
+        TEST_CASE(suppressingSyntaxErrorsWhileFileRead); // PR #1333
         TEST_CASE(symbol);
 
         TEST_CASE(unusedFunction);
@@ -180,7 +179,7 @@ private:
         // Clear the error log
         errout.str("");
 
-        CppCheck cppCheck(*this, true);
+        CppCheck cppCheck(*this, true, nullptr);
         Settings& settings = cppCheck.settings();
         settings.exitCode = 1;
         settings.inlineSuppressions = true;
@@ -494,6 +493,26 @@ private:
         Suppressions suppressions2;
         suppressions2.parseFile(file2);
         ASSERT_EQUALS(true, suppressions2.isSuppressed(errorMessage("abc", "test.cpp", 123)));
+
+        std::istringstream file3("abc // comment");
+        Suppressions suppressions3;
+        suppressions3.parseFile(file3);
+        ASSERT_EQUALS(true, suppressions3.isSuppressed(errorMessage("abc", "test.cpp", 123)));
+
+        std::istringstream file4("abc\t\t # comment");
+        Suppressions suppressions4;
+        suppressions4.parseFile(file4);
+        ASSERT_EQUALS(true, suppressions4.isSuppressed(errorMessage("abc", "test.cpp", 123)));
+
+        std::istringstream file5("abc:test.cpp\t\t # comment");
+        Suppressions suppressions5;
+        suppressions5.parseFile(file5);
+        ASSERT_EQUALS(true, suppressions5.isSuppressed(errorMessage("abc", "test.cpp", 123)));
+
+        std::istringstream file6("abc:test.cpp:123\t\t # comment with . inside");
+        Suppressions suppressions6;
+        suppressions6.parseFile(file6);
+        ASSERT_EQUALS(true, suppressions6.isSuppressed(errorMessage("abc", "test.cpp", 123)));
     }
 
     void inlinesuppress() {
@@ -511,8 +530,6 @@ private:
     }
 
     void inlinesuppress_symbolname() {
-        Suppressions suppressions;
-
         checkSuppression("void f() {\n"
                          "    int a;\n"
                          "    /* cppcheck-suppress uninitvar symbolName=a */\n"
@@ -631,7 +648,7 @@ private:
     void globalSuppressions() { // Testing that Cppcheck::useGlobalSuppressions works (#8515)
         errout.str("");
 
-        CppCheck cppCheck(*this, false); // <- do not "use global suppressions". pretend this is a thread that just checks a file.
+        CppCheck cppCheck(*this, false, nullptr); // <- do not "use global suppressions". pretend this is a thread that just checks a file.
         Settings& settings = cppCheck.settings();
         settings.nomsg.addSuppressionLine("uninitvar");
         settings.exitCode = 1;
@@ -663,7 +680,7 @@ private:
         // Clear the error log
         errout.str("");
 
-        CppCheck cppCheck(*this, true);
+        CppCheck cppCheck(*this, true, nullptr);
         Settings& settings = cppCheck.settings();
         settings.addEnabled("style");
         settings.inlineSuppressions = true;

@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -82,6 +82,10 @@ namespace ValueFlow {
                 return false;
             switch (valueType) {
             case ValueType::INT:
+            case ValueType::CONTAINER_SIZE:
+            case ValueType::BUFFER_SIZE:
+            case ValueType::ITERATOR_START:
+            case ValueType::ITERATOR_END:
                 if (intvalue != rhs.intvalue)
                     return false;
                 break;
@@ -100,14 +104,6 @@ namespace ValueFlow {
                 break;
             case ValueType::UNINIT:
                 break;
-            case ValueType::BUFFER_SIZE:
-                if (intvalue != rhs.intvalue)
-                    return false;
-                break;
-            case ValueType::CONTAINER_SIZE:
-                if (intvalue != rhs.intvalue)
-                    return false;
-                break;
             case ValueType::LIFETIME:
                 if (tokvalue != rhs.tokvalue)
                     return false;
@@ -120,7 +116,9 @@ namespace ValueFlow {
             switch (valueType) {
             case ValueType::INT:
             case ValueType::BUFFER_SIZE:
-            case ValueType::CONTAINER_SIZE: {
+            case ValueType::CONTAINER_SIZE:
+            case ValueType::ITERATOR_START:
+            case ValueType::ITERATOR_END: {
                 f(intvalue);
                 break;
             }
@@ -172,9 +170,11 @@ namespace ValueFlow {
             decreaseRange();
         }
 
+        void assumeCondition(const Token* tok);
+
         std::string infoString() const;
 
-        enum ValueType { INT, TOK, FLOAT, MOVED, UNINIT, CONTAINER_SIZE, LIFETIME, BUFFER_SIZE } valueType;
+        enum ValueType { INT, TOK, FLOAT, MOVED, UNINIT, CONTAINER_SIZE, LIFETIME, BUFFER_SIZE, ITERATOR_START, ITERATOR_END } valueType;
         bool isIntValue() const {
             return valueType == ValueType::INT;
         }
@@ -199,6 +199,15 @@ namespace ValueFlow {
         bool isBufferSizeValue() const {
             return valueType == ValueType::BUFFER_SIZE;
         }
+        bool isIteratorValue() const {
+            return valueType == ValueType::ITERATOR_START || valueType == ValueType::ITERATOR_END;
+        }
+        bool isIteratorStartValue() const {
+            return valueType == ValueType::ITERATOR_START;
+        }
+        bool isIteratorEndValue() const {
+            return valueType == ValueType::ITERATOR_END;
+        }
 
         bool isLocalLifetimeValue() const {
             return valueType == ValueType::LIFETIME && lifetimeScope == LifetimeScope::Local;
@@ -206,6 +215,10 @@ namespace ValueFlow {
 
         bool isArgumentLifetimeValue() const {
             return valueType == ValueType::LIFETIME && lifetimeScope == LifetimeScope::Argument;
+        }
+
+        bool isSubFunctionLifetimeValue() const {
+            return valueType == ValueType::LIFETIME && lifetimeScope == LifetimeScope::SubFunction;
         }
 
         bool isNonValue() const {
@@ -252,21 +265,11 @@ namespace ValueFlow {
         /** Path id */
         MathLib::bigint path;
 
-        enum class LifetimeKind {Object, Lambda, Iterator, Address} lifetimeKind;
+        enum class LifetimeKind {Object, SubObject, Lambda, Iterator, Address} lifetimeKind;
 
-        enum class LifetimeScope { Local, Argument } lifetimeScope;
+        enum class LifetimeScope { Local, Argument, SubFunction } lifetimeScope;
 
-        static const char * toString(MoveKind moveKind) {
-            switch (moveKind) {
-            case MoveKind::NonMovedVariable:
-                return "NonMovedVariable";
-            case MoveKind::MovedVariable:
-                return "MovedVariable";
-            case MoveKind::ForwardedVariable:
-                return "ForwardedVariable";
-            }
-            return "";
-        }
+        static const char* toString(MoveKind moveKind);
 
         /** How known is this value */
         enum class ValueKind {
@@ -365,9 +368,14 @@ struct LifetimeToken {
 
 const Token *parseCompareInt(const Token *tok, ValueFlow::Value &true_value, ValueFlow::Value &false_value);
 
-std::vector<LifetimeToken> getLifetimeTokens(const Token* tok, ValueFlow::Value::ErrorPath errorPath = ValueFlow::Value::ErrorPath{}, int depth = 20);
+std::vector<LifetimeToken> getLifetimeTokens(const Token* tok,
+        bool escape = false,
+        ValueFlow::Value::ErrorPath errorPath = ValueFlow::Value::ErrorPath{},
+        int depth = 20);
 
 const Variable* getLifetimeVariable(const Token* tok, ValueFlow::Value::ErrorPath& errorPath, bool* addressOf = nullptr);
+
+const Variable* getLifetimeVariable(const Token* tok);
 
 bool isLifetimeBorrowed(const Token *tok, const Settings *settings);
 
@@ -375,6 +383,6 @@ std::string lifetimeType(const Token *tok, const ValueFlow::Value *val);
 
 std::string lifetimeMessage(const Token *tok, const ValueFlow::Value *val, ValueFlow::Value::ErrorPath &errorPath);
 
-ValueFlow::Value getLifetimeObjValue(const Token *tok);
+ValueFlow::Value getLifetimeObjValue(const Token *tok, bool inconclusive = false);
 
 #endif // valueflowH

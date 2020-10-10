@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,6 +19,7 @@
 #include "checkother.h"
 #include "library.h"
 #include "platform.h"
+#include "preprocessor.h"
 #include "settings.h"
 #include "standards.h"
 #include "testsuite.h"
@@ -56,6 +57,7 @@ private:
         TEST_CASE(zeroDiv10);
         TEST_CASE(zeroDiv11);
         TEST_CASE(zeroDiv12);
+        TEST_CASE(zeroDiv13);
 
         TEST_CASE(zeroDivCond); // division by zero / useless condition
 
@@ -86,6 +88,7 @@ private:
         TEST_CASE(varScope24);      // pointer / reference
         TEST_CASE(varScope25);      // time_t
         TEST_CASE(varScope26);      // range for loop, map
+        TEST_CASE(varScope27);      // #7733 - #if
 
         TEST_CASE(oldStylePointerCast);
         TEST_CASE(invalidPointerCast);
@@ -95,6 +98,7 @@ private:
         TEST_CASE(passedByValue_externC);
 
         TEST_CASE(constVariable);
+        TEST_CASE(constParameterCallback);
 
         TEST_CASE(switchRedundantAssignmentTest);
         TEST_CASE(switchRedundantOperationTest);
@@ -130,6 +134,7 @@ private:
         TEST_CASE(duplicateBranch1); // tests extracted by http://www.viva64.com/en/b/0149/ ( Comparison between PVS-Studio and cppcheck ): Errors detected in Quake 3: Arena by PVS-Studio: Fragment 2
         TEST_CASE(duplicateBranch2); // empty macro
         TEST_CASE(duplicateBranch3);
+        TEST_CASE(duplicateBranch4);
         TEST_CASE(duplicateExpression1);
         TEST_CASE(duplicateExpression2); // ticket #2730
         TEST_CASE(duplicateExpression3); // ticket #3317
@@ -140,10 +145,12 @@ private:
         TEST_CASE(duplicateExpression8);
         TEST_CASE(duplicateExpression9); // #9320
         TEST_CASE(duplicateExpression10); // #9485
+        TEST_CASE(duplicateExpression11); // #8916 (function call)
         TEST_CASE(duplicateExpressionLoop);
         TEST_CASE(duplicateValueTernary);
         TEST_CASE(duplicateExpressionTernary); // #6391
         TEST_CASE(duplicateExpressionTemplate); // #6930
+        TEST_CASE(duplicateExpressionCompareWithZero);
         TEST_CASE(oppositeExpression);
         TEST_CASE(duplicateVarExpression);
         TEST_CASE(duplicateVarExpressionUnique);
@@ -154,8 +161,9 @@ private:
         TEST_CASE(checkSignOfUnsignedVariable);
         TEST_CASE(checkSignOfPointer);
 
-        TEST_CASE(checkForSuspiciousSemicolon1);
-        TEST_CASE(checkForSuspiciousSemicolon2);
+        TEST_CASE(checkSuspiciousSemicolon1);
+        TEST_CASE(checkSuspiciousSemicolon2);
+        TEST_CASE(checkSuspiciousSemicolon3);
 
         TEST_CASE(checkInvalidFree);
 
@@ -233,10 +241,15 @@ private:
         TEST_CASE(cpp11FunctionArgInit); // #7846 - "void foo(int declaration = {}) {"
 
         TEST_CASE(shadowVariables);
-        TEST_CASE(constArgument);
+        TEST_CASE(knownArgument);
+        TEST_CASE(knownArgumentHiddenVariableExpression);
         TEST_CASE(checkComparePointers);
 
         TEST_CASE(unusedVariableValueTemplate); // #8994
+
+        TEST_CASE(moduloOfOne);
+
+        TEST_CASE(sameExpressionPointers);
     }
 
     void check(const char code[], const char *filename = nullptr, bool experimental = false, bool inconclusive = true, bool runSimpleChecks=true, bool verbose=false, Settings* settings = nullptr) {
@@ -296,10 +309,14 @@ private:
         std::map<std::string, simplecpp::TokenList*> filedata;
         simplecpp::preprocess(tokens2, tokens1, files, filedata, simplecpp::DUI());
 
+        Preprocessor preprocessor(*settings, nullptr);
+        preprocessor.setDirectives(tokens1);
+
         // Tokenizer..
         Tokenizer tokenizer(settings, this);
-        tokenizer.createTokens(&tokens2);
+        tokenizer.createTokens(std::move(tokens2));
         tokenizer.simplifyTokens1("");
+        tokenizer.setPreprocessor(&preprocessor);
 
         // Check..
         CheckOther checkOther(&tokenizer, settings, this);
@@ -548,6 +565,16 @@ private:
               "}\n");
         ASSERT_EQUALS("[test.cpp:2]: (error) Division by zero.\n", errout.str());
     }
+    void zeroDiv13() {
+        // #7324
+        check("int f () {\n"
+              "    int dividend = 10;\n"
+              "        int divisor = 1;\n"
+              "    dividend = dividend / (--divisor);\n"
+              "    return dividend;\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:4]: (error) Division by zero.\n", errout.str());
+    }
 
     void zeroDivCond() {
         check("void f(unsigned int x) {\n"
@@ -671,6 +698,16 @@ private:
               "  else if (x > 0) {}\n"
               "  else\n"
               "    a = b / -x;\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("struct A {\n"
+              "    int x;\n"
+              "};\n"
+              "int f(A* a) {\n"
+              "    if (a->x == 0) \n"
+              "        a->x = 1;\n"
+              "    return 1/a->x;\n"
               "}\n");
         ASSERT_EQUALS("", errout.str());
     }
@@ -1223,6 +1260,24 @@ private:
               "  }\n"
               "}\n");
         ASSERT_EQUALS("", errout.str());
+    }
+
+    void varScope27() {
+        checkP("void f() {\n"
+               "  int x = 0;\n"
+               "#ifdef X\n"
+               "#endif\n"
+               "  if (id == ABC) { return x; }\n"
+               "}");
+        ASSERT_EQUALS("", errout.str());
+
+        checkP("void f() {\n"
+               "#ifdef X\n"
+               "#endif\n"
+               "  int x = 0;\n"
+               "  if (id == ABC) { return x; }\n"
+               "}");
+        ASSERT_EQUALS("[test.cpp:4]: (style) The scope of the variable 'x' can be reduced.\n", errout.str());
     }
 
     void checkOldStylePointerCast(const char code[]) {
@@ -1955,6 +2010,283 @@ private:
               "}\n");
         ASSERT_EQUALS("", errout.str());
 
+        check("int* f(std::list<int>& x, unsigned int y) {\n"
+              "    for (int& m : x) {\n"
+              "        if (m == y)\n"
+              "            return &m;\n"
+              "    }\n"
+              "    return nullptr;\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("int& f(std::list<int>& x, int& y) {\n"
+              "    for (int& m : x) {\n"
+              "        if (m == y)\n"
+              "            return m;\n"
+              "    }\n"
+              "    return y;\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("bool from_string(int& t, const std::string& s) {\n"
+              "    std::istringstream iss(s);\n"
+              "    return !(iss >> t).fail();\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        // #9710
+        check("class a {\n"
+              "    void operator()(int& i) const {\n"
+              "        i++;\n"
+              "    }\n"
+              "};\n"
+              "void f(int& i) {\n"
+              "    a()(i);\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("class a {\n"
+              "    void operator()(int& i) const {\n"
+              "        i++;\n"
+              "    }\n"
+              "};\n"
+              "void f(int& i) {\n"
+              "    a x;\n"
+              "    x(i);\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("class a {\n"
+              "    void operator()(const int& i) const;\n"
+              "};\n"
+              "void f(int& i) {\n"
+              "    a x;\n"
+              "    x(i);\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:4]: (style) Parameter 'i' can be declared with const\n", errout.str());
+
+        //cast or assignment to a non-const reference should prevent the warning
+        check("struct T { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Parameter 'x' can be declared with const\n", errout.str());
+        check("struct T : public U  { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    const T& z = x;\n" //Make sure we find all assignments
+              "    T& y = x\n"
+              "    y.mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+        check("struct T : public U  { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    const U& y = x\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Parameter 'x' can be declared with const\n", errout.str());
+        check("struct T : public U  { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    U& y = x\n"
+              "    y.mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+        check("struct T : public U  { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    my<fancy>::type& y = x\n" //we don't know if y is const or not
+              "    y.mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+        check("struct T : public U  { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    const U& y = static_cast<const U&>(x)\n"
+              "    y.mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Parameter 'x' can be declared with const\n", errout.str());
+        check("struct T : public U  { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    U& y = static_cast<U&>(x)\n"
+              "    y.mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    const U& y = dynamic_cast<const U&>(x)\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Parameter 'x' can be declared with const\n", errout.str());
+        check(
+            "struct T : public U { void dostuff() const {}};\n"
+            "void a(T& x) {\n"
+            "    x.dostuff();\n"
+            "    const U& y = dynamic_cast<U const &>(x)\n"
+            "}"
+        );
+        ASSERT_EQUALS("[test.cpp:2]: (style) Parameter 'x' can be declared with const\n", errout.str());
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    const U& y = dynamic_cast<U & const>(x)\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Parameter 'x' can be declared with const\n", errout.str());
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    U& y = dynamic_cast<U&>(x)\n"
+              "    y.mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    const U& y = dynamic_cast<typename const U&>(x)\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Parameter 'x' can be declared with const\n", errout.str());
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    U& y = dynamic_cast<typename U&>(x)\n"
+              "    y.mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    U* y = dynamic_cast<U*>(&x)\n"
+              "    y->mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    const U * y = dynamic_cast<const U *>(&x)\n"
+              "    y->mutate();\n" //to avoid warnings that y can be const
+              "}");
+        TODO_ASSERT_EQUALS("can be const", errout.str(), ""); //Currently taking the address is treated as a non-const operation when it should depend on what we do with it
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    U const * y = dynamic_cast<U const *>(&x)\n"
+              "    y->mutate();\n" //to avoid warnings that y can be const
+              "}");
+        TODO_ASSERT_EQUALS("can be const", errout.str(), ""); //Currently taking the address is treated as a non-const operation when it should depend on what we do with it
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    U * const y = dynamic_cast<U * const>(&x)\n"
+              "    y->mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    const U const * const * const * const y = dynamic_cast<const U const * const * const * const>(&x)\n"
+              "    y->mutate();\n" //to avoid warnings that y can be const
+              "}");
+        TODO_ASSERT_EQUALS("can be const", errout.str(), ""); //Currently taking the address is treated as a non-const operation when it should depend on what we do with it
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    const U const * const *  * const y = dynamic_cast<const U const * const *  * const>(&x)\n"
+              "    y->mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    my::fancy<typename type const *> const * * const y = dynamic_cast<my::fancy<typename type const *> const * * const>(&x)\n"
+              "    y->mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    my::fancy<typename type const *> const * const  * const y = dynamic_cast<my::fancy<typename type const *> const * const  * const>(&x)\n"
+              "    y->mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    const U& y = (const U&)(x)\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Parameter 'x' can be declared with const\n", errout.str());
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    U& y = (U&)(x)\n"
+              "    y.mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    const U& y = (typename const U&)(x)\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Parameter 'x' can be declared with const\n", errout.str());
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    U& y = (typename U&)(x)\n"
+              "    y.mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+        check("struct T : public U { void dostuff() const {}};\n"
+              "void a(T& x) {\n"
+              "    x.dostuff();\n"
+              "    U* y = (U*)(&x)\n"
+              "    y->mutate();\n" //to avoid warnings that y can be const
+              "}");
+        ASSERT_EQUALS("", errout.str());
+
+        check("struct C { void f() const; };\n" // #9875 - crash
+              "\n"
+              "void foo(C& x) {\n"
+              "   x.f();\n"
+              "   foo( static_cast<U2>(0) );\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
+
+        check("class a {\n"
+              "    void foo(const int& i) const;\n"
+              "    void operator()(int& i) const;\n"
+              "};\n"
+              "void f(int& i) {\n"
+              "    a()(i);\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("class a {\n"
+              "    void operator()(const int& i) const;\n"
+              "};\n"
+              "void f(int& i) {\n"
+              "    a()(i);\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:4]: (style) Parameter 'i' can be declared with const\n", errout.str());
+
+        // #9767
+        check("void fct1(MyClass& object) {\n"
+              "   fct2([&](void){}, object);\n"
+              "}\n"
+              "bool fct2(std::function<void()> lambdaExpression, MyClass& object) {\n"
+              "   object.modify();\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        // #9778
+        check("struct A {};\n"
+              "struct B : A {};\n"
+              "B& f(A& x) {\n"
+              "    return static_cast<B&>(x);\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
         check("void e();\n"
               "void g(void);\n"
               "void h(void);\n"
@@ -2191,6 +2523,30 @@ private:
               "{\n"
               "}\n");
         TODO_ASSERT_EQUALS("[test.cpp:16]: (style) Parameter 'i' can be declared with const\n", "", errout.str());
+    }
+
+    void constParameterCallback() {
+        check("int callback(std::vector<int>& x) { return x[0]; }\n"
+              "void f() { dostuff(callback); }");
+        ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:1]: (style) Parameter 'x' can be declared with const. However it seems that 'callback' is a callback function, if 'x' is declared with const you might also need to cast function pointer(s).\n", errout.str());
+
+        // #9906
+        check("class EventEngine : public IEventEngine {\n"
+              "public:\n"
+              "    EventEngine();\n"
+              "\n"
+              "private:\n"
+              "    void signalEvent(ev::sig& signal, int revents);\n"
+              "};\n"
+              "\n"
+              "EventEngine::EventEngine() {\n"
+              "    mSigWatcher.set<EventEngine, &EventEngine::signalEvent>(this);\n"
+              "}\n"
+              "\n"
+              "void EventEngine::signalEvent(ev::sig& signal, int revents) {\n"
+              "    switch (signal.signum) {}\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:10] -> [test.cpp:13]: (style) Parameter 'signal' can be declared with const. However it seems that 'signalEvent' is a callback function, if 'signal' is declared with const you might also need to cast function pointer(s).\n", errout.str());
     }
 
     void switchRedundantAssignmentTest() {
@@ -3871,12 +4227,12 @@ private:
         ASSERT_EQUALS("", errout.str());
 
         check("void f(char c) {\n"
-              "    printf(\"%i\", 1 + 1 ? 1 : 2);\n" // "1+1" is simplified away
+              "    printf(\"%i\", a + b ? 1 : 2);\n"
               "}",nullptr,false,false,false);
         ASSERT_EQUALS("[test.cpp:2]: (style) Clarify calculation precedence for '+' and '?'.\n", errout.str());
 
         check("void f() {\n"
-              "    std::cout << x << 1 ? 2 : 3;\n"
+              "    std::cout << x << y ? 2 : 3;\n"
               "}");
         ASSERT_EQUALS("[test.cpp:2]: (style) Clarify calculation precedence for '<<' and '?'.\n", errout.str());
 
@@ -3902,6 +4258,24 @@ private:
         ASSERT_EQUALS("", errout.str());
 
         check("void f() { a = *p ? 1 : 2; }");
+        ASSERT_EQUALS("", errout.str());
+
+        check("void f(int x) { const char *p = x & 1 ? \"1\" : \"0\"; }");
+        ASSERT_EQUALS("", errout.str());
+
+        check("void foo() { x = a % b ? \"1\" : \"0\"; }");
+        ASSERT_EQUALS("", errout.str());
+
+        check("void f(int x) { return x & 1 ? '1' : '0'; }");
+        ASSERT_EQUALS("", errout.str());
+
+        check("void f(int x) { return x & 16 ? 1 : 0; }");
+        ASSERT_EQUALS("", errout.str());
+
+        check("void f(int x) { return x % 16 ? 1 : 0; }");
+        ASSERT_EQUALS("", errout.str());
+
+        check("enum {X,Y}; void f(int x) { return x & Y ? 1 : 0; }");
         ASSERT_EQUALS("", errout.str());
     }
 
@@ -4095,6 +4469,17 @@ private:
               "        x = i;\n"
               "    } else {\n"
               "        x = j;\n"
+              "    }\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+    }
+
+    void duplicateBranch4() {
+        check("void* f(bool b) {\n"
+              "    if (b) {\n"
+              "        return new A::Y(true);\n"
+              "    } else {\n"
+              "        return new A::Z(true);\n"
               "    }\n"
               "}\n");
         ASSERT_EQUALS("", errout.str());
@@ -4530,13 +4915,13 @@ private:
               "    const int i = sizeof(int);\n"
               "    if ( i != sizeof (int)){}\n"
               "}\n");
-        ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:3]: (style) The comparison 'i != sizeof(int)' is always false because 'i' and 'sizeof(int)' represent the same value.\n", errout.str());
+        TODO_ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:3]: (style) The comparison 'i != sizeof(int)' is always false because 'i' and 'sizeof(int)' represent the same value.\n", "", errout.str());
 
         check("void f() {\n"
               "    const int i = sizeof(int);\n"
               "    if ( sizeof (int) != i){}\n"
               "}\n");
-        ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:3]: (style) The comparison 'sizeof(int) != i' is always false because 'sizeof(int)' and 'i' represent the same value.\n", errout.str());
+        TODO_ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:3]: (style) The comparison 'sizeof(int) != i' is always false because 'sizeof(int)' and 'i' represent the same value.\n", "", errout.str());
 
         check("void f(int a = 1) { if ( a != 1){}}\n");
         ASSERT_EQUALS("", errout.str());
@@ -4589,7 +4974,7 @@ private:
         ASSERT_EQUALS("", errout.str());
 
         check("const int a = 1;\n"
-              "    void f() {\n"
+              "void f() {\n"
               "    if ( a != 1){} \n"
               "}\n");
         ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:3]: (style) The comparison 'a != 1' is always false.\n", errout.str());
@@ -4755,6 +5140,27 @@ private:
         ASSERT_EQUALS("", errout.str());
     }
 
+    void duplicateExpression11() {
+        check("class Fred {\n"
+              "public:\n"
+              "    double getScale() const { return m_range * m_zoom; }\n"
+              "    void setZoom(double z) { m_zoom = z; }\n"
+              "    void dostuff(int);\n"
+              "private:\n"
+              "    double m_zoom;\n"
+              "    double m_range;\n"
+              "};\n"
+              "\n"
+              "void Fred::dostuff(int x) {\n"
+              "    if (x == 43) {\n"
+              "        double old_scale = getScale();\n"
+              "        setZoom(m_zoom + 1);\n"
+              "        double scale_ratio = getScale() / old_scale;\n" // <- FP
+              "    }\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
+    }
+
     void duplicateExpressionLoop() {
         check("void f() {\n"
               "    int a = 1;\n"
@@ -4905,6 +5311,57 @@ private:
               "}\n"
               "\n"
               "static auto a = f<0>();");
+        ASSERT_EQUALS("", errout.str());
+    }
+
+    void duplicateExpressionCompareWithZero() {
+        check("void f(int* x, bool b) {\n"
+              "    if ((x && b) || (x != 0 && b)) {}\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Same expression on both sides of '||' because 'x&&b' and 'x!=0&&b' represent the same value.\n", errout.str());
+
+        check("void f(int* x, bool b) {\n"
+              "    if ((x != 0 && b) || (x && b)) {}\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Same expression on both sides of '||' because 'x!=0&&b' and 'x&&b' represent the same value.\n", errout.str());
+
+        check("void f(int* x, bool b) {\n"
+              "    if ((x && b) || (b && x != 0)) {}\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Same expression on both sides of '||' because 'x&&b' and 'b&&x!=0' represent the same value.\n", errout.str());
+
+        check("void f(int* x, bool b) {\n"
+              "    if ((!x && b) || (x == 0 && b)) {}\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Same expression on both sides of '||' because '!x&&b' and 'x==0&&b' represent the same value.\n", errout.str());
+
+        check("void f(int* x, bool b) {\n"
+              "    if ((x == 0 && b) || (!x && b)) {}\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Same expression on both sides of '||' because 'x==0&&b' and '!x&&b' represent the same value.\n", errout.str());
+
+        check("void f(int* x, bool b) {\n"
+              "    if ((!x && b) || (b && x == 0)) {}\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Same expression on both sides of '||' because '!x&&b' and 'b&&x==0' represent the same value.\n", errout.str());
+
+        check("struct A {\n"
+              "    int* getX() const;\n"
+              "    bool getB() const;\n"
+              "    void f() {\n"
+              "        if ((getX() && getB()) || (getX() != 0 && getB())) {}\n"
+              "    }\n"
+              "};\n");
+        ASSERT_EQUALS("[test.cpp:5]: (style) Same expression on both sides of '||' because 'getX()&&getB()' and 'getX()!=0&&getB()' represent the same value.\n", errout.str());
+
+        check("void f(int* x, bool b) {\n"
+              "    if ((x && b) || (x == 0 && b)) {}\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("void f(int* x, bool b) {\n"
+              "    if ((!x && b) || (x != 0 && b)) {}\n"
+              "}\n");
         ASSERT_EQUALS("", errout.str());
     }
 
@@ -5244,6 +5701,42 @@ private:
               "}");
         ASSERT_EQUALS("[test.cpp:4] -> [test.cpp:3]: (style, inconclusive) Same expression used in consecutive assignments of 'i' and 'j'.\n", errout.str());
 
+        check("struct A { int x; int y; };"
+              "void use(int);\n"
+              "void test(A a) {\n"
+              "    int i = a.x;\n"
+              "    int j = a.x;\n"
+              "    use(j);\n"
+              "    if (i == j) {}\n"
+              "}");
+        ASSERT_EQUALS(
+            "[test.cpp:4] -> [test.cpp:3]: (style, inconclusive) Same expression used in consecutive assignments of 'i' and 'j'.\n",
+            errout.str());
+
+        check("struct A { int x; int y; };"
+              "void use(int);\n"
+              "void test(A a) {\n"
+              "    int i = a.x;\n"
+              "    int j = a.x;\n"
+              "    use(j);\n"
+              "    if (i == a.x) {}\n"
+              "}");
+        ASSERT_EQUALS(
+            "[test.cpp:4] -> [test.cpp:3]: (style, inconclusive) Same expression used in consecutive assignments of 'i' and 'j'.\n",
+            errout.str());
+
+        check("struct A { int x; int y; };"
+              "void use(int);\n"
+              "void test(A a) {\n"
+              "    int i = a.x;\n"
+              "    int j = a.x;\n"
+              "    use(i);\n"
+              "    if (j == a.x) {}\n"
+              "}");
+        ASSERT_EQUALS(
+            "[test.cpp:4] -> [test.cpp:3]: (style, inconclusive) Same expression used in consecutive assignments of 'i' and 'j'.\n",
+            errout.str());
+
         // Issue #8612
         check("struct P\n"
               "{\n"
@@ -5334,6 +5827,24 @@ private:
               "}\n");
         ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:3]: (style) The comparison 'val < 0' is always false.\n"
                       "[test.cpp:2] -> [test.cpp:4]: (style) The comparison 'val > 0' is always false.\n", errout.str());
+
+        check("void f() {\n"
+              "  int val = 0;\n"
+              "  int *p = &val;n"
+              "  val = 1;\n"
+              "  if (*p < 0) continue;\n"
+              "  if ((*p > 0)) {}\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("void f() {\n"
+              "  int val = 0;\n"
+              "  int *p = &val;\n"
+              "  if (*p < 0) continue;\n"
+              "  if ((*p > 0)) {}\n"
+              "}\n");
+        TODO_ASSERT_EQUALS("[test.cpp:2] -> [test.cpp:3]: (style) The comparison '*p < 0' is always false.\n"
+                           "[test.cpp:2] -> [test.cpp:4]: (style) The comparison '*p > 0' is always false.\n", "", errout.str());
 
         check("void f() {\n"
               "  int val = 0;\n"
@@ -5802,7 +6313,7 @@ private:
         ASSERT_EQUALS("", errout.str());
     }
 
-    void checkForSuspiciousSemicolon1() {
+    void checkSuspiciousSemicolon1() {
         check("void foo() {\n"
               "  for(int i = 0; i < 10; ++i);\n"
               "}");
@@ -5813,23 +6324,23 @@ private:
               "  for(int i = 0; i < 10; ++i); {\n"
               "  }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:2]: (warning, inconclusive) Suspicious use of ; at the end of 'for' statement.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:2]: (warning) Suspicious use of ; at the end of 'for' statement.\n", errout.str());
 
         check("void foo() {\n"
               "  while (!quit); {\n"
               "    do_something();\n"
               "  }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:2]: (warning, inconclusive) Suspicious use of ; at the end of 'while' statement.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:2]: (warning) Suspicious use of ; at the end of 'while' statement.\n", errout.str());
     }
 
-    void checkForSuspiciousSemicolon2() {
+    void checkSuspiciousSemicolon2() {
         check("void foo() {\n"
               "  if (i == 1); {\n"
               "    do_something();\n"
               "  }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:2]: (warning, inconclusive) Suspicious use of ; at the end of 'if' statement.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:2]: (warning) Suspicious use of ; at the end of 'if' statement.\n", errout.str());
 
         // Seen this in the wild
         check("void foo() {\n"
@@ -5864,6 +6375,14 @@ private:
         ASSERT_EQUALS("", errout.str());
     }
 
+    void checkSuspiciousSemicolon3() {
+        checkP("#define REQUIRE(code) {code}\n"
+               "void foo() {\n"
+               "  if (x == 123);\n"
+               "  REQUIRE(y=z);\n"
+               "}");
+        ASSERT_EQUALS("", errout.str());
+    }
 
     void checkInvalidFree() {
         check("void foo(char *p) {\n"
@@ -6604,6 +7123,14 @@ private:
         ASSERT_EQUALS("test.cpp:4:style:Variable '*var' is reassigned a value before the old one has been used.\n"
                       "test.cpp:3:note:*var is assigned\n"
                       "test.cpp:4:note:*var is overwritten\n", errout.str());
+
+        // Volatile variables
+        check("void f() {\n"
+              "  volatile char *reg = (volatile char *)0x12345;\n"
+              "  *reg = 12;\n"
+              "  *reg = 34;\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
     }
 
     void redundantVarAssignment_trivial() {
@@ -8294,20 +8821,23 @@ private:
 
         check("void f(int x) { int x; }");
         ASSERT_EQUALS("[test.cpp:1] -> [test.cpp:1]: (style) Local variable 'x' shadows outer argument\n", errout.str());
+
+        check("class C { C(); void foo() { static int C = 0; } }"); // #9195 - shadow constructor
+        ASSERT_EQUALS("", errout.str());
     }
 
-    void constArgument() {
+    void knownArgument() {
         check("void g(int);\n"
               "void f(int x) {\n"
               "   g((x & 0x01) >> 7);\n"
               "}\n");
-        ASSERT_EQUALS("[test.cpp:3]: (style) Argument '(x&0x01)>>7' to function g is always 0\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (style) Argument '(x&0x01)>>7' to function g is always 0. It does not matter what value 'x' has.\n", errout.str());
 
         check("void g(int);\n"
               "void f(int x) {\n"
               "   g((int)((x & 0x01) >> 7));\n"
               "}\n");
-        ASSERT_EQUALS("[test.cpp:3]: (style) Argument '(int)((x&0x01)>>7)' to function g is always 0\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (style) Argument '(int)((x&0x01)>>7)' to function g is always 0. It does not matter what value 'x' has.\n", errout.str());
 
         check("void g(int);\n"
               "void f(int x) {\n"
@@ -8361,6 +8891,18 @@ private:
               "}\n");
         ASSERT_EQUALS("", errout.str());
 
+        check("char *yytext;\n"
+              "void re_init_scanner() {\n"
+              "  int size = 256;\n"
+              "  yytext = xmalloc(size * sizeof *yytext);\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
+
+        check("void foo(char *c) {\n"
+              "    if (*c == '+' && (operand || !isalnum(*c))) {}\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
+
         // #8986
         check("void f(int);\n"
               "void g() {\n"
@@ -8384,6 +8926,47 @@ private:
               "    g(y.x);\n"
               "}\n");
         ASSERT_EQUALS("", errout.str());
+
+        // allow known argument value in assert call
+        check("void g(int);\n"
+              "void f(int x) {\n"
+              "   ASSERT((int)((x & 0x01) >> 7));\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        // #9905 - expression that does not use integer calculation at all
+        check("void foo() {\n"
+              "    const std::string heading = \"Interval\";\n"
+              "    std::cout << std::setw(heading.length());\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
+
+        // #9909 - struct member with known value
+        check("struct LongStack {\n"
+              "    int maxsize;\n"
+              "};\n"
+              "\n"
+              "void growLongStack(LongStack* self) {\n"
+              "    self->maxsize = 32;\n"
+              "    dostuff(self->maxsize * sizeof(intptr_t));\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
+    }
+
+    void knownArgumentHiddenVariableExpression() {
+        // #9914 - variable expression is explicitly hidden
+        check("void f(int x) {\n"
+              "    dostuff(x && false);\n"
+              "    dostuff(false && x);\n"
+              "    dostuff(x || true);\n"
+              "    dostuff(true || x);\n"
+              "    dostuff(x * 0);\n"
+              "    dostuff(0 * x);\n"
+              "}\n");
+        ASSERT_EQUALS("[test.cpp:3]: (style) Argument 'false&&x' to function dostuff is always 0. Constant literal calculation disable/hide variable expression 'x'.\n"
+                      "[test.cpp:5]: (style) Argument 'true||x' to function dostuff is always 1. Constant literal calculation disable/hide variable expression 'x'.\n"
+                      "[test.cpp:6]: (style) Argument 'x*0' to function dostuff is always 0. Constant literal calculation disable/hide variable expression 'x'.\n"
+                      "[test.cpp:7]: (style) Argument '0*x' to function dostuff is always 0. Constant literal calculation disable/hide variable expression 'x'.\n", errout.str());
     }
 
     void checkComparePointers() {
@@ -8528,6 +9111,29 @@ private:
         ASSERT_EQUALS("", errout.str());
     }
 
+    void moduloOfOne() {
+        check("void f(unsigned int x) {\n"
+              "  int y = x % 1;\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:2]: (style) Modulo of one is always equal to zero\n", errout.str());
+
+        check("void f() {\n"
+              "  for (int x = 1; x < 10; x++) {\n"
+              "    int y = 100 % x;\n"
+              "  }\n"
+              "}");
+        ASSERT_EQUALS("", errout.str());
+    }
+
+    void sameExpressionPointers() {
+        check("int f(int *i);\n"
+              "void g(int *a, int *b) {\n"
+              "    int c = *a;\n"
+              "    f(a);\n"
+              "    if (b && c != *a) {}\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+    }
 };
 
 REGISTER_TEST(TestOther)

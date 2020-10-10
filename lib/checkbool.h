@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -107,7 +107,7 @@ private:
     void assignBoolToPointerError(const Token *tok);
     void assignBoolToFloatError(const Token *tok);
     void bitwiseOnBooleanError(const Token *tok, const std::string &expression, const std::string &op);
-    void comparisonOfBoolExpressionWithIntError(const Token *tok, bool n0o1);
+    void comparisonOfBoolExpressionWithIntError(const Token *tok, bool not0or1);
     void pointerArithBoolError(const Token *tok);
     void returnValueBoolError(const Token *tok);
 

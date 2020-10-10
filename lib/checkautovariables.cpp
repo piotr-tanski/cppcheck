@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,6 @@
 #include "checkautovariables.h"
 
 #include "astutils.h"
-#include "errorlogger.h"
 #include "library.h"
 #include "settings.h"
 #include "symboldatabase.h"
@@ -244,23 +243,23 @@ void CheckAutoVariables::autoVariables()
             // Critical assignment
             if (Token::Match(tok, "[;{}] %var% = & %var%") && isRefPtrArg(tok->next()) && isAutoVar(tok->tokAt(4))) {
                 if (checkRvalueExpression(tok->tokAt(4)))
-                    errorAutoVariableAssignment(tok->next(), false);
+                    checkAutoVariableAssignment(tok->next(), false);
             } else if (Token::Match(tok, "[;{}] * %var% =") && isPtrArg(tok->tokAt(2)) && isAddressOfLocalVariable(tok->tokAt(3)->astOperand2())) {
-                errorAutoVariableAssignment(tok->next(), false);
+                checkAutoVariableAssignment(tok->next(), false);
             } else if (Token::Match(tok, "[;{}] %var% . %var% =") && isPtrArg(tok->next()) && isAddressOfLocalVariable(tok->tokAt(4)->astOperand2())) {
-                errorAutoVariableAssignment(tok->next(), false);
+                checkAutoVariableAssignment(tok->next(), false);
             } else if (Token::Match(tok, "[;{}] %var% . %var% = %var% ;")) {
                 // TODO: check if the parameter is only changed temporarily (#2969)
                 if (printInconclusive && isPtrArg(tok->next())) {
                     if (isAutoVarArray(tok->tokAt(5)))
-                        errorAutoVariableAssignment(tok->next(), true);
+                        checkAutoVariableAssignment(tok->next(), true);
                 }
                 tok = tok->tokAt(5);
             } else if (Token::Match(tok, "[;{}] * %var% = %var% ;")) {
                 const Variable * var1 = tok->tokAt(2)->variable();
                 if (var1 && var1->isArgument() && Token::Match(var1->nameToken()->tokAt(-3), "%type% * *")) {
                     if (isAutoVarArray(tok->tokAt(4)))
-                        errorAutoVariableAssignment(tok->next(), false);
+                        checkAutoVariableAssignment(tok->next(), false);
                 }
                 tok = tok->tokAt(4);
             } else if (Token::Match(tok, "[;{}] %var% [") && Token::simpleMatch(tok->linkAt(2), "] =") &&
@@ -275,7 +274,9 @@ void CheckAutoVariables::autoVariables()
                     errorInvalidDeallocation(tok, nullptr);
                 else if (tok && tok->variable() && tok->variable()->isPointer()) {
                     for (const ValueFlow::Value &v : tok->values()) {
-                        if (v.isTokValue() && isArrayVar(v.tokvalue)) {
+                        if (!(v.isTokValue()))
+                            continue;
+                        if (isArrayVar(v.tokvalue)) {
                             errorInvalidDeallocation(tok, &v);
                             break;
                         }
@@ -289,6 +290,41 @@ void CheckAutoVariables::autoVariables()
             }
         }
     }
+}
+
+bool CheckAutoVariables::checkAutoVariableAssignment(const Token *expr, bool inconclusive, const Token *startToken)
+{
+    if (!startToken)
+        startToken = Token::findsimplematch(expr, "=")->next();
+    for (const Token *tok = startToken; tok; tok = tok->next()) {
+        if (tok->str() == "}" && tok->scope()->type == Scope::ScopeType::eFunction)
+            errorAutoVariableAssignment(expr, inconclusive);
+
+        if (Token::Match(tok, "return|throw|break|continue")) {
+            errorAutoVariableAssignment(expr, inconclusive);
+            return true;
+        }
+        if (Token::simpleMatch(tok, "=")) {
+            const Token *lhs = tok;
+            while (Token::Match(lhs->previous(), "%name%|.|*"))
+                lhs = lhs->previous();
+            const Token *e = expr;
+            while (e->str() != "=" && lhs->str() == e->str()) {
+                e = e->next();
+                lhs = lhs->next();
+            }
+            if (lhs->str() == "=")
+                return false;
+        }
+
+        if (Token::simpleMatch(tok, "if (")) {
+            const Token *ifStart = tok->linkAt(1)->next();
+            return checkAutoVariableAssignment(expr, inconclusive, ifStart) || checkAutoVariableAssignment(expr, inconclusive, ifStart->link()->next());
+        }
+        if (Token::simpleMatch(tok, "} else {"))
+            tok = tok->linkAt(2);
+    }
+    return false;
 }
 
 //---------------------------------------------------------------------------
@@ -433,22 +469,6 @@ static bool isDeadScope(const Token * tok, const Scope * scope)
     return false;
 }
 
-static const Token * getParentLifetime(const Token *tok)
-{
-    if (!tok)
-        return tok;
-    const Variable * var = tok->variable();
-    // TODO: Call getLifetimeVariable for deeper analysis
-    if (!var)
-        return tok;
-    if (var->isLocal())
-        return tok;
-    const Token * parent = getParentMember(tok);
-    if (parent != tok)
-        return getParentLifetime(parent);
-    return tok;
-}
-
 static int getPointerDepth(const Token *tok)
 {
     if (!tok)
@@ -460,13 +480,56 @@ static bool isDeadTemporary(bool cpp, const Token* tok, const Token* expr, const
 {
     if (!isTemporary(cpp, tok, library))
         return false;
-    if (expr && !precedes(nextAfterAstRightmostLeaf(tok->astTop()), nextAfterAstRightmostLeaf(expr->astTop())))
-        return false;
+    if (expr) {
+        if (!precedes(nextAfterAstRightmostLeaf(tok->astTop()), nextAfterAstRightmostLeaf(expr->astTop())))
+            return false;
+        const Token* parent = tok->astParent();
+        // Is in a for loop
+        if (astIsRHS(tok) && Token::simpleMatch(parent, ":") && Token::simpleMatch(parent->astParent(), "(") && Token::simpleMatch(parent->astParent()->previous(), "for (")) {
+            const Token* braces = parent->astParent()->link()->next();
+            if (precedes(braces, expr) && precedes(expr, braces->link()))
+                return false;
+        }
+    }
     return true;
+}
+
+static bool isEscapedReference(const Variable* var)
+{
+    if (!var)
+        return false;
+    if (!var->isReference())
+        return false;
+    if (!var->declEndToken())
+        return false;
+    if (!Token::simpleMatch(var->declEndToken(), "="))
+        return false;
+    const Token* vartok = var->declEndToken()->astOperand2();
+    return !isTemporary(true, vartok, nullptr, false);
+}
+
+static bool isDanglingSubFunction(const Token* tokvalue, const Token* tok)
+{
+    if (!tokvalue)
+        return false;
+    const Variable* var = tokvalue->variable();
+    if (!var->isLocal())
+        return false;
+    Function* f = Scope::nestedInFunction(tok->scope());
+    if (!f)
+        return false;
+    const Token* parent = tokvalue->astParent();
+    while (parent && !Token::Match(parent->previous(), "%name% (")) {
+        parent = parent->astParent();
+    }
+    if (!Token::simpleMatch(parent, "("))
+        return false;
+    return exprDependsOnThis(parent);
 }
 
 void CheckAutoVariables::checkVarLifetimeScope(const Token * start, const Token * end)
 {
+    const bool printInconclusive = (mSettings->inconclusive);
     if (!start)
         return;
     const Scope * scope = start->scope();
@@ -479,7 +542,9 @@ void CheckAutoVariables::checkVarLifetimeScope(const Token * start, const Token 
     for (const Token *tok = start; tok && tok != end; tok = tok->next()) {
         // Return reference from function
         if (returnRef && Token::simpleMatch(tok->astParent(), "return")) {
-            for (const LifetimeToken& lt : getLifetimeTokens(tok)) {
+            for (const LifetimeToken& lt : getLifetimeTokens(tok, true)) {
+                if (!printInconclusive && lt.inconclusive)
+                    continue;
                 const Variable* var = lt.token->variable();
                 if (var && !var->isGlobal() && !var->isStatic() && !var->isReference() && !var->isRValueReference() &&
                     isInScope(var->nameToken(), tok->scope())) {
@@ -501,29 +566,50 @@ void CheckAutoVariables::checkVarLifetimeScope(const Token * start, const Token 
                 errorDanglingReference(tok, var, errorPath);
                 continue;
             }
+            // Reference to temporary
+        } else if (tok->variable() && (tok->variable()->isReference() || tok->variable()->isRValueReference())) {
+            for (const LifetimeToken& lt : getLifetimeTokens(getParentLifetime(tok))) {
+                if (!printInconclusive && lt.inconclusive)
+                    continue;
+                const Token * tokvalue = lt.token;
+                if (isDeadTemporary(mTokenizer->isCPP(), tokvalue, tok, &mSettings->library)) {
+                    errorDanglingTempReference(tok, lt.errorPath, lt.inconclusive);
+                    break;
+                }
+            }
+
         }
         for (const ValueFlow::Value& val:tok->values()) {
-            if (!val.isLocalLifetimeValue())
+            if (!val.isLocalLifetimeValue() && !val.isSubFunctionLifetimeValue())
                 continue;
-            for (const LifetimeToken& lt :getLifetimeTokens(getParentLifetime(val.tokvalue))) {
+            if (!printInconclusive && val.isInconclusive())
+                continue;
+            const bool escape = Token::Match(tok->astParent(), "return|throw");
+            for (const LifetimeToken& lt : getLifetimeTokens(getParentLifetime(val.tokvalue), escape)) {
                 const Token * tokvalue = lt.token;
-                if (Token::Match(tok->astParent(), "return|throw")) {
-                    if (getPointerDepth(tok) < getPointerDepth(tokvalue))
-                        continue;
-                    if (!isLifetimeBorrowed(tok, mSettings))
-                        continue;
-                    if ((tokvalue->variable() && isInScope(tokvalue->variable()->nameToken(), scope)) ||
-                        isDeadTemporary(mTokenizer->isCPP(), tokvalue, tok, &mSettings->library)) {
-                        errorReturnDanglingLifetime(tok, &val);
+                if (val.isLocalLifetimeValue()) {
+                    if (escape) {
+                        if (getPointerDepth(tok) < getPointerDepth(tokvalue))
+                            continue;
+                        if (!isLifetimeBorrowed(tok, mSettings))
+                            continue;
+                        if ((tokvalue->variable() && !isEscapedReference(tokvalue->variable()) &&
+                             isInScope(tokvalue->variable()->nameToken(), scope)) ||
+                            isDeadTemporary(mTokenizer->isCPP(), tokvalue, tok, &mSettings->library)) {
+                            errorReturnDanglingLifetime(tok, &val);
+                            break;
+                        }
+                    } else if (tokvalue->variable() && isDeadScope(tokvalue->variable()->nameToken(), tok->scope())) {
+                        errorInvalidLifetime(tok, &val);
+                        break;
+                    } else if (!tokvalue->variable() &&
+                               isDeadTemporary(mTokenizer->isCPP(), tokvalue, tok, &mSettings->library)) {
+                        errorDanglingTemporaryLifetime(tok, &val);
                         break;
                     }
-                } else if (tokvalue->variable() && isDeadScope(tokvalue->variable()->nameToken(), tok->scope())) {
-                    errorInvalidLifetime(tok, &val);
-                    break;
-                } else if (!tokvalue->variable() && isDeadTemporary(mTokenizer->isCPP(), tokvalue, tok, &mSettings->library)) {
-                    errorDanglingTemporaryLifetime(tok, &val);
-                    break;
-                } else if (tokvalue->variable() && isInScope(tokvalue->variable()->nameToken(), tok->scope())) {
+                }
+                if (tokvalue->variable() && (isInScope(tokvalue->variable()->nameToken(), tok->scope()) ||
+                                             (val.isSubFunctionLifetimeValue() && isDanglingSubFunction(tokvalue, tok)))) {
                     const Variable * var = nullptr;
                     const Token * tok2 = tok;
                     if (Token::simpleMatch(tok->astParent(), "=")) {
@@ -608,6 +694,13 @@ void CheckAutoVariables::errorDanglngLifetime(const Token *tok, const ValueFlow:
     std::string msg = "Non-local variable '" + tokName + "' will use " + lifetimeMessage(tok, val, errorPath);
     errorPath.emplace_back(tok, "");
     reportError(errorPath, Severity::error, "danglingLifetime", msg + ".", CWE562, inconclusive);
+}
+
+void CheckAutoVariables::errorDanglingTempReference(const Token* tok, ErrorPath errorPath, bool inconclusive)
+{
+    errorPath.emplace_back(tok, "");
+    reportError(
+        errorPath, Severity::error, "danglingTempReference", "Using reference to dangling temporary.", CWE562, inconclusive);
 }
 
 void CheckAutoVariables::errorReturnReference(const Token* tok, ErrorPath errorPath, bool inconclusive)

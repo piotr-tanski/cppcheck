@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,7 +22,6 @@
 
 #include "checkassert.h"
 
-#include "errorlogger.h"
 #include "settings.h"
 #include "symboldatabase.h"
 #include "token.h"
@@ -50,6 +49,9 @@ void CheckAssert::assertWithSideEffects()
 
         const Token *endTok = tok->next()->link();
         for (const Token* tmp = tok->next(); tmp != endTok; tmp = tmp->next()) {
+            if (Token::simpleMatch(tmp, "sizeof ("))
+                tmp = tmp->linkAt(1);
+
             checkVariableAssignment(tmp, tok->scope());
 
             if (tmp->tokType() != Token::eFunction)
@@ -120,13 +122,16 @@ void CheckAssert::assignmentInAssertError(const Token *tok, const std::string& v
 // checks if side effects happen on the variable prior to tmp
 void CheckAssert::checkVariableAssignment(const Token* assignTok, const Scope *assertionScope)
 {
-    const Variable* prevVar = assignTok->previous()->variable();
-    if (!prevVar)
+    if (!assignTok->isAssignmentOp() && assignTok->tokType() != Token::eIncDecOp)
+        return;
+
+    const Variable* var = assignTok->astOperand1()->variable();
+    if (!var)
         return;
 
     // Variable declared in inner scope in assert => don't warn
-    if (assertionScope != prevVar->scope()) {
-        const Scope *s = prevVar->scope();
+    if (assertionScope != var->scope()) {
+        const Scope *s = var->scope();
         while (s && s != assertionScope)
             s = s->nestedIn;
         if (s == assertionScope)
@@ -135,12 +140,12 @@ void CheckAssert::checkVariableAssignment(const Token* assignTok, const Scope *a
 
     // assignment
     if (assignTok->isAssignmentOp() || assignTok->tokType() == Token::eIncDecOp) {
-        if (prevVar->isConst())
+        if (var->isConst()) {
             return;
-
-        assignmentInAssertError(assignTok, prevVar->name());
+        }
+        assignmentInAssertError(assignTok, var->name());
     }
-    // TODO: function calls on prevVar
+    // TODO: function calls on var
 }
 
 bool CheckAssert::inSameScope(const Token* returnTok, const Token* assignTok)

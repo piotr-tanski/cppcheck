@@ -1,10 +1,9 @@
 #include "pathanalysis.h"
 #include "astutils.h"
-#include "library.h"
-#include "mathlib.h"
-#include "settings.h"
 #include "symboldatabase.h"
 #include "token.h"
+#include "valueflow.h"
+#include <algorithm>
 
 const Scope* PathAnalysis::findOuterScope(const Scope * scope)
 {

@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -40,7 +40,7 @@ private:
         void reportOut(const std::string & /*outmsg*/) OVERRIDE {}
         void bughuntingReport(const std::string & /*str*/) OVERRIDE {}
 
-        void reportErr(const ErrorLogger::ErrorMessage &msg) OVERRIDE {
+        void reportErr(const ErrorMessage &msg) OVERRIDE {
             id.push_back(msg.id);
         }
     };
@@ -75,7 +75,7 @@ private:
 
     void getErrorMessages() const {
         ErrorLogger2 errorLogger;
-        CppCheck cppCheck(errorLogger, true);
+        CppCheck cppCheck(errorLogger, true, nullptr);
         cppCheck.getErrorMessages();
         ASSERT(!errorLogger.id.empty());
 

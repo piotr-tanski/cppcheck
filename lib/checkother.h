@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,17 +24,23 @@
 
 #include "check.h"
 #include "config.h"
-#include "valueflow.h"
+#include "errortypes.h"
+#include "utils.h"
 
 #include <cstddef>
 #include <string>
 #include <vector>
 
-class ErrorLogger;
+namespace ValueFlow {
+    class Value;
+}
+
 class Settings;
 class Token;
 class Tokenizer;
+class Function;
 class Variable;
+class ErrorLogger;
 
 /// @addtogroup Checks
 /// @{
@@ -82,7 +88,7 @@ public:
         checkOther.checkEvaluationOrder();
         checkOther.checkFuncArgNamesDifferent();
         checkOther.checkShadowVariables();
-        checkOther.checkConstArgument();
+        checkOther.checkKnownArgument();
         checkOther.checkComparePointers();
         checkOther.checkIncompleteStatement();
         checkOther.checkPipeParameterSize();
@@ -96,6 +102,7 @@ public:
         checkOther.checkCastIntToCharAndBack();
         checkOther.checkMisusedScopedObject();
         checkOther.checkAccessOfMovedVariable();
+        checkOther.checkModuloOfOne();
     }
 
     /** @brief Clarify calculation for ".. a * b ? .." */
@@ -207,9 +214,11 @@ public:
     /** @brief %Check for shadow variables. Less noisy than gcc/clang -Wshadow. */
     void checkShadowVariables();
 
-    void checkConstArgument();
+    void checkKnownArgument();
 
     void checkComparePointers();
+
+    void checkModuloOfOne();
 
 private:
     // Error messages..
@@ -221,7 +230,7 @@ private:
     void cstyleCastError(const Token *tok);
     void invalidPointerCastError(const Token* tok, const std::string& from, const std::string& to, bool inconclusive, bool toIsInt);
     void passedByValueError(const Token *tok, const std::string &parname, bool inconclusive);
-    void constVariableError(const Variable *var);
+    void constVariableError(const Variable *var, const Function *function);
     void constStatementError(const Token *tok, const std::string &type, bool inconclusive);
     void signedCharArrayIndexError(const Token *tok);
     void unknownSignCharArrayIndexError(const Token *tok);
@@ -258,15 +267,16 @@ private:
     void commaSeparatedReturnError(const Token *tok);
     void redundantPointerOpError(const Token* tok, const std::string& varname, bool inconclusive);
     void raceAfterInterlockedDecrementError(const Token* tok);
-    void unusedLabelError(const Token* tok, bool inSwitch);
+    void unusedLabelError(const Token* tok, bool inSwitch, bool hasIfdef);
     void unknownEvaluationOrder(const Token* tok);
     static bool isMovedParameterAllowedForInconclusiveFunction(const Token * tok);
     void accessMovedError(const Token *tok, const std::string &varname, const ValueFlow::Value *value, bool inconclusive);
     void funcArgNamesDifferent(const std::string & functionName, nonneg int index, const Token* declaration, const Token* definition);
     void funcArgOrderDifferent(const std::string & functionName, const Token * declaration, const Token * definition, const std::vector<const Token*> & declarations, const std::vector<const Token*> & definitions);
     void shadowError(const Token *var, const Token *shadowed, std::string type);
-    void constArgumentError(const Token *tok, const Token *ftok, const ValueFlow::Value *value);
+    void knownArgumentError(const Token *tok, const Token *ftok, const ValueFlow::Value *value, const std::string &varexpr, bool isVariableExpressionHidden);
     void comparePointersError(const Token *tok, const ValueFlow::Value *v1, const ValueFlow::Value *v2);
+    void checkModuloOfOneError(const Token *tok);
 
     void getErrorMessages(ErrorLogger *errorLogger, const Settings *settings) const OVERRIDE {
         CheckOther c(nullptr, settings, errorLogger);
@@ -292,7 +302,7 @@ private:
         c.checkCastIntToCharAndBackError(nullptr, "func_name");
         c.cstyleCastError(nullptr);
         c.passedByValueError(nullptr, "parametername", false);
-        c.constVariableError(nullptr);
+        c.constVariableError(nullptr, nullptr);
         c.constStatementError(nullptr, "type", false);
         c.signedCharArrayIndexError(nullptr);
         c.unknownSignCharArrayIndexError(nullptr);
@@ -322,8 +332,10 @@ private:
         c.nanInArithmeticExpressionError(nullptr);
         c.commaSeparatedReturnError(nullptr);
         c.redundantPointerOpError(nullptr,  "varname", false);
-        c.unusedLabelError(nullptr,  true);
-        c.unusedLabelError(nullptr,  false);
+        c.unusedLabelError(nullptr, false, false);
+        c.unusedLabelError(nullptr, false, true);
+        c.unusedLabelError(nullptr, true, false);
+        c.unusedLabelError(nullptr, true, true);
         c.unknownEvaluationOrder(nullptr);
         c.accessMovedError(nullptr, "v", nullptr, false);
         c.funcArgNamesDifferent("function", 1, nullptr, nullptr);
@@ -331,13 +343,14 @@ private:
         c.shadowError(nullptr, nullptr, "variable");
         c.shadowError(nullptr, nullptr, "function");
         c.shadowError(nullptr, nullptr, "argument");
-        c.constArgumentError(nullptr, nullptr, nullptr);
+        c.knownArgumentError(nullptr, nullptr, nullptr, "x", false);
         c.comparePointersError(nullptr, nullptr, nullptr);
         c.redundantAssignmentError(nullptr, nullptr, "var", false);
         c.redundantInitializationError(nullptr, nullptr, "var", false);
 
         const std::vector<const Token *> nullvec;
         c.funcArgOrderDifferent("function", nullptr, nullptr, nullvec, nullvec);
+        c.checkModuloOfOneError(nullptr);
     }
 
     static std::string myName() {
@@ -398,7 +411,9 @@ private:
                "- function declaration and definition argument names different.\n"
                "- function declaration and definition argument order different.\n"
                "- shadow variable.\n"
-               "- variable can be declared const.\n";
+               "- variable can be declared const.\n"
+               "- calculating modulo of one.\n"
+               "- known function argument, suspicious calculation.\n";
     }
 };
 /// @}

@@ -393,14 +393,14 @@ enum misra_12_3_e1 { M123A1, M123B1, M123C1 };
 enum misra_12_3_e2 { M123A2 = 3, M123B2 = 4, M123C2 };
 typedef enum misra_12_3_e3 { M123A3 , M123B3, M123C3 } misra_12_3_e3_t;
 typedef enum { M123A4 , M123B4, M123C4 } misra_12_3_e4_t;
-struct misra_12_3_s1 { int a; int b; int c, d; };
+struct misra_12_3_s1 { int a; int b; int c, d; }; // 12.3
 static struct misra_12_3_s1 misra_12_3_s1_inst = {
   3,
   4, 5,
   6, // no warning
 };
-typedef struct misra_12_3_s2 { int a; int b; int c, d; } misra_12_3_s2_t;
-typedef struct { int a; int b; int c, d; } misra_12_3_s3_t;
+typedef struct misra_12_3_s2 { int a; int b; int c, d; } misra_12_3_s2_t; // 12.3
+typedef struct { int a; int b; int c, d; } misra_12_3_s3_t; // 12.3
 void misra_12_3_fn1(int, int); static int misra_12_3_v5, misra_12_4_v6; // 12.3
 void misra_12_3_fn2(int a, int b) // 2.7
 { int d, e; } // 12.3
@@ -459,6 +459,8 @@ void misra_12_3(int a, int b, int c) { // no warning
   misra_12_3_fn4(misra_12_3_fn7(&a1, 32), &a1);
   misra_12_3_fn6(misra_12_3_fn5(&a1, 32), &a1);
   misra_12_3_fn6(misra_12_3_fn7(&a1, 32), &a1);
+  misra_12_3_fn7(maxlen, fn(va, unsigned long), false);
+  misra_12_3_fn8(maxlen, (unsigned long)((uintptr_t)fn(va, void*)), false);
 
   const struct fun_t
   {
@@ -473,6 +475,7 @@ void misra_12_3(int a, int b, int c) { // no warning
 
 #define MISRA12_4a 2000000000u
 #define MISRA12_4b 4000000000u
+#define volatile_macro_12_4  (*(volatile U32 *) 0xFFFFFC10u)
 void misra_12_4() {
   uint32_t x;
   bool t;
@@ -481,6 +484,7 @@ void misra_12_4() {
   x = 0u - 1u; // 12.4
   x = t ? 0u : (0u-1u); // 12.4
   x = 556200230913ULL;
+  foo(&volatile_macro_12_4); // no crash
 }
 
 struct misra_13_1_t { int a; int b; };
@@ -738,6 +742,14 @@ void misra_15_6() {
 #if A>1  // no-warning
   (void)0;
 #endif
+
+#if A > 0x42
+  if (true) {
+    (void)0;
+  }
+  if (true)
+#endif
+  { (void)0; } // no-warning
 
   do {} while (x<0); // no-warning
 }
@@ -997,11 +1009,17 @@ struct {
   uint8_t data_2[   ]; // 18.7
 } r18_7_struct;
 
+typedef enum {
+    R18_8_ENUM_CONSTANT_0,
+    R18_8_ENUM_CONSTANT_1,
+} r18_8_enum;
+
 void misra_18_8(int x) {
   int buf1[10];
   int buf2[sizeof(int)];
   int vla[x]; // 18.8
   static const unsigned char arr18_8_1[] = UNDEFINED_ID;
+  static uint32_t enum_test_0[R18_8_ENUM_CONSTANT_0] = {0};
 }
 
 union misra_19_2 { }; // 19.2
@@ -1017,6 +1035,24 @@ union misra_19_2 { }; // 19.2
 #define M_20_7_3(A)  ((A)+A) // 20.7
 #define M_20_7_4(A)  x##A // 20.10 this test was written to see there are not FPs
 #define M_20_7_5(A,B)  f(A, B) // no warning
+#define M_20_7_6(x) a ## x = ( x ) // 20.10
+#define M_20_7_7(x) a  = # x // 20.10
+#define M_20_7_8(x, fn) a = fn ( # x ) // 20.7 20.10
+#define M_20_7_9(x, fn) a = (fn) ( # x ) // 20.10
+#define M_20_7_10(A, B) (A " " B)
+#define M_20_7_11(A, B, C) (A " " B " " C)
+#define M_20_7_12(A, B, C) (A " " B + C) // 20.7
+#define M_20_7_13(A, B, C) (A + B " " C) // 20.7
+#define M_20_7_14(STRING1, STRING2) (STRING1 " " STRING2)
+#define M_20_7_15(STRING1, STRING2, STRING3) (STRING1 " " STRING2 " " STRING3)
+#define M_20_7_16(STRING1, STRING2, STRING3) (STRING1 " " STRING2 + STRING3) // 20.7
+#define M_20_7_17(STRING1, STRING2, STRING3) (STRING1 + STRING2 " " STRING3) // 20.7
+
+// Compliant: M is a structure member name, not an expression
+struct { int a; } struct_20_7_s;
+#define M_20_7_6(M) struct_20_7.M
+#define M_20_7_7(M) (struct_20_7).M
+
 #define MUL(a  ,b ) ( a * b ) // 20.7
 
 #define M_20_10(a) (#a) // 20.10

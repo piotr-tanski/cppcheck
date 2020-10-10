@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -96,9 +96,6 @@ private:
         // Check..
         CheckIO checkIO(&tokenizer, &settings, this);
         checkIO.checkWrongPrintfScanfArguments();
-
-        // Simplify token list..
-        tokenizer.simplifyTokenList2();
         checkIO.checkCoutCerrMisusage();
         checkIO.checkFileUsage();
         checkIO.invalidScanf();
@@ -532,7 +529,7 @@ private:
               "    FILE *a = fopen(\"aa\", \"r\");\n"
               "    while (fclose(a)) {}\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:3]: (error) Used file that is not opened.\n", errout.str());
+        TODO_ASSERT_EQUALS("[test.cpp:3]: (error) Used file that is not opened.\n", "", errout.str());
 
         // #6823
         check("void foo() {\n"
@@ -931,7 +928,7 @@ private:
               "    const int scanrc=sscanf(line, \"Project(\\\"{%36s}\\\")\", projectId);\n"
               "    sscanf(input, \"%5s\", output);\n"
               "}", true);
-        ASSERT_EQUALS("", errout.str());
+        ASSERT_EQUALS("[test.cpp:6]: (warning, inconclusive) Width 36 given in format string (no. 1) is smaller than destination buffer 'projectId[2048]'.\n", errout.str());
 
         check("void foo(unsigned int i) {\n"
               "  scanf(\"%h\", &i);\n"

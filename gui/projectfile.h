@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,6 +19,7 @@
 #ifndef PROJECT_FILE_H
 #define PROJECT_FILE_H
 
+#include <map>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -43,6 +44,16 @@ class ProjectFile : public QObject {
 public:
     explicit ProjectFile(QObject *parent = nullptr);
     explicit ProjectFile(const QString &filename, QObject *parent = nullptr);
+    ~ProjectFile() {
+        if (this == mActiveProject) mActiveProject = nullptr;
+    }
+
+    static ProjectFile* getActiveProject() {
+        return mActiveProject;
+    }
+    void setActiveProject() {
+        mActiveProject = this;
+    }
 
     /**
      * @brief Read the project file.
@@ -167,6 +178,13 @@ public:
     }
 
     /**
+    * @brief Get path to addon python script
+    * @param filesDir Data files folder set by --data-dir
+    * @param addon addon i.e. "misra" to lookup
+    */
+    static QString getAddonFilePath(QString filesDir, const QString &addon);
+
+    /**
     * @brief Get list of addons and tools.
     * @return list of addons and tools.
     */
@@ -198,6 +216,34 @@ public:
 
     void setMaxCtuDepth(int maxCtuDepth) {
         mMaxCtuDepth = maxCtuDepth;
+    }
+
+    int getMaxTemplateRecursion() const {
+        return mMaxTemplateRecursion;
+    }
+
+    void setMaxTemplateRecursion(int maxTemplateRecursion) {
+        mMaxTemplateRecursion = maxTemplateRecursion;
+    }
+
+    const std::map<std::string,std::string>& getFunctionContracts() const {
+        return mFunctionContracts;
+    }
+
+    const std::map<QString, Settings::VariableContracts>& getVariableContracts() const {
+        return mVariableContracts;
+    }
+
+    void setVariableContracts(QString var, QString min, QString max) {
+        mVariableContracts[var] = Settings::VariableContracts{min.toStdString(), max.toStdString()};
+    }
+
+    void deleteFunctionContract(QString function) {
+        mFunctionContracts.erase(function.toStdString());
+    }
+
+    void deleteVariableContract(QString var) {
+        mVariableContracts.erase(var);
     }
 
     /**
@@ -264,6 +310,9 @@ public:
      */
     void setLibraries(const QStringList &libraries);
 
+    /** Set contract for a function */
+    void setFunctionContract(QString function, QString expects);
+
     /**
      * @brief Set platform.
      * @param platform platform.
@@ -275,6 +324,9 @@ public:
      * @param suppressions List of suppressions.
      */
     void setSuppressions(const QList<Suppressions::Suppression> &suppressions);
+
+    /** Add suppression */
+    void addSuppression(const Suppressions::Suppression &suppression);
 
     /**
      * @brief Set list of addons.
@@ -294,6 +346,12 @@ public:
     void setTags(const QStringList &tags) {
         mTags = tags;
     }
+
+    /** Set tags for a warning */
+    void setWarningTags(std::size_t hash, QString tags);
+
+    /** Get tags for a warning */
+    QString getWarningTags(std::size_t hash) const;
 
     /**
      * @brief Write project file (to disk).
@@ -378,6 +436,18 @@ protected:
     void readExcludes(QXmlStreamReader &reader);
 
     /**
+     * @brief Read function contracts.
+     * @param reader XML stream reader.
+     */
+    void readFunctionContracts(QXmlStreamReader &reader);
+
+    /**
+     * @brief Read variable constraints.
+     * @param reader XML stream reader.
+     */
+    void readVariableContracts(QXmlStreamReader &reader);
+
+    /**
      * @brief Read lists of Visual Studio configurations
      * @param reader XML stream reader.
      */
@@ -394,6 +464,12 @@ protected:
      * @param reader XML stream reader.
      */
     void readSuppressions(QXmlStreamReader &reader);
+
+    /**
+     * @brief Read tag warnings, what warnings are tagged with a specific tag
+     * @param reader XML stream reader.
+     */
+    void readTagWarnings(QXmlStreamReader &reader, const QString &tag);
 
     /**
       * @brief Read string list
@@ -486,6 +562,10 @@ private:
      */
     QStringList mLibraries;
 
+    std::map<std::string, std::string> mFunctionContracts;
+
+    std::map<QString, Settings::VariableContracts> mVariableContracts;
+
     /**
      * @brief Platform
      */
@@ -508,15 +588,24 @@ private:
     bool mClangTidy;
 
     /**
-     * @brief Warning tags
+     * @brief Tags
      */
     QStringList mTags;
+
+    /**
+     * @brief Warning tags
+     */
+    std::map<std::size_t, QString> mWarningTags;
 
     /** Max CTU depth */
     int mMaxCtuDepth;
 
+    /** Max template instantiation recursion */
+    int mMaxTemplateRecursion;
+
     QStringList mCheckUnknownFunctionReturn;
 
+    static ProjectFile *mActiveProject;
 };
 /// @}
 #endif  // PROJECT_FILE_H

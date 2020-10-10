@@ -10,6 +10,13 @@ INCLUDEPATH += . \
     ../externals/z3/include
 QT += widgets
 QT += printsupport
+QT += help
+
+# Build online help
+#onlinehelp.target = online-help.qhc
+#onlinehelp.commands = qhelpgenerator $$PWD/help/online-help.qhp -o online-help.qch ; qhelpgenerator $$PWD/help/online-help.qhcp -o online-help.qhc
+#QMAKE_EXTRA_TARGETS += onlinehelp
+#PRE_TARGETDEPS += online-help.qhc
 
 contains(LINKCORE, [yY][eE][sS]) {
     LIBS += -l../bin/cppcheck-core
@@ -60,6 +67,8 @@ RESOURCES = gui.qrc
 FORMS = about.ui \
         application.ui \
         file.ui \
+        functioncontractdialog.ui \
+        helpdialog.ui \
         mainwindow.ui \
         projectfiledialog.ui \
         resultsview.ui \
@@ -69,7 +78,8 @@ FORMS = about.ui \
         librarydialog.ui \
         libraryaddfunctiondialog.ui \
         libraryeditargdialog.ui \
-        newsuppressiondialog.ui
+        newsuppressiondialog.ui \
+        variablecontractsdialog.ui
 
 TRANSLATIONS =  cppcheck_de.ts \
                 cppcheck_es.ts \
@@ -93,6 +103,19 @@ contains(LINKCORE, [yY][eE][sS]) {
     include($$PWD/../lib/lib.pri)
 }
 
+win32-msvc* {
+    MSVC_VER = $$(VisualStudioVersion)
+    message($$MSVC_VER)
+    MSVC_VER_SPLIT = $$split(MSVC_VER, .)
+    MSVC_VER_MAJOR = $$first(MSVC_VER_SPLIT)
+    # doesn't compile with older VS versions - assume VS2019 (16.x) is the first working for now
+    !lessThan(MSVC_VER_MAJOR, 16) {
+        message("using precompiled header")
+        CONFIG += precompile_header
+        PRECOMPILED_HEADER = precompiled_qmake.h
+    }
+}
+
 HEADERS += aboutdialog.h \
            application.h \
            applicationdialog.h \
@@ -108,6 +131,8 @@ HEADERS += aboutdialog.h \
            erroritem.h \
            filelist.h \
            fileviewdialog.h \
+           functioncontractdialog.h \
+           helpdialog.h \
            mainwindow.h \
            platforms.h \
            printablereport.h \
@@ -124,6 +149,7 @@ HEADERS += aboutdialog.h \
            threadresult.h \
            translationhandler.h \
            txtreport.h \
+           variablecontractsdialog.h \
            xmlreport.h \
            xmlreportv2.h \
            librarydialog.h \
@@ -147,6 +173,8 @@ SOURCES += aboutdialog.cpp \
            erroritem.cpp \
            filelist.cpp \
            fileviewdialog.cpp \
+           functioncontractdialog.cpp \
+           helpdialog.cpp \
            main.cpp \
            mainwindow.cpp\
            platforms.cpp \
@@ -164,6 +192,7 @@ SOURCES += aboutdialog.cpp \
            threadresult.cpp \
            translationhandler.cpp \
            txtreport.cpp \
+           variablecontractsdialog.cpp \
            xmlreport.cpp \
            xmlreportv2.cpp \
            librarydialog.cpp \
@@ -182,11 +211,11 @@ win32 {
 }
 
 contains(QMAKE_CC, gcc) {
-    QMAKE_CXXFLAGS += -std=c++11 -Wno-missing-field-initializers -Wno-missing-braces -Wno-sign-compare -Wno-deprecated-declarations
+    QMAKE_CXXFLAGS += -std=c++0x -pedantic -Wall -Wextra -Wcast-qual -Wno-deprecated-declarations -Wfloat-equal -Wmissing-declarations -Wmissing-format-attribute -Wno-long-long -Wpacked -Wredundant-decls -Wundef -Wno-shadow -Wno-missing-field-initializers -Wno-missing-braces -Wno-sign-compare -Wno-multichar
 }
 
 contains(QMAKE_CXX, clang++) {
-    QMAKE_CXXFLAGS += -std=c++11
+    QMAKE_CXXFLAGS += -std=c++0x -pedantic -Wall -Wextra -Wcast-qual -Wno-deprecated-declarations -Wfloat-equal -Wmissing-declarations -Wmissing-format-attribute -Wno-long-long -Wpacked -Wredundant-decls -Wundef -Wno-shadow -Wno-missing-field-initializers -Wno-missing-braces -Wno-sign-compare -Wno-multichar
 }
 
 contains(HAVE_QCHART, [yY][eE][sS]) {

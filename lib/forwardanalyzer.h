@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,11 +19,11 @@
 #ifndef forwardanalyzerH
 #define forwardanalyzerH
 
-#include "token.h"
-#include "valueptr.h"
 #include <vector>
 
 class Settings;
+class Token;
+template <class T> class ValuePtr;
 
 struct ForwardAnalyzer {
     struct Action {
@@ -108,11 +108,14 @@ struct ForwardAnalyzer {
     virtual bool updateScope(const Token* endBlock, bool modified) const = 0;
     /// If the value is conditional
     virtual bool isConditional() const = 0;
-    /// The condtion that wil be assumes during analysis
+    /// The condition that will be assumed during analysis
     virtual void assume(const Token* tok, bool state, const Token* at = nullptr) = 0;
     virtual ~ForwardAnalyzer() {}
 };
 
-void valueFlowGenericForward(Token* start, const Token* end, const ValuePtr<ForwardAnalyzer>& fa, const Settings* settings);
+ForwardAnalyzer::Action valueFlowGenericForward(Token* start,
+        const Token* end,
+        const ValuePtr<ForwardAnalyzer>& fa,
+        const Settings* settings);
 
 #endif

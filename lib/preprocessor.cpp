@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -69,8 +69,8 @@ Preprocessor::Preprocessor(Settings& settings, ErrorLogger *errorLogger) : mSett
 
 Preprocessor::~Preprocessor()
 {
-    for (std::map<std::string, simplecpp::TokenList *>::iterator it = mTokenLists.begin(); it != mTokenLists.end(); ++it)
-        delete it->second;
+    for (std::pair<const std::string, simplecpp::TokenList *>& tokenList : mTokenLists)
+        delete tokenList.second;
 }
 
 namespace {
@@ -83,15 +83,17 @@ namespace {
 
 static bool parseInlineSuppressionCommentToken(const simplecpp::Token *tok, std::list<Suppressions::Suppression> &inlineSuppressions, std::list<BadInlineSuppression> *bad)
 {
+    const std::string cppchecksuppress("cppcheck-suppress");
+
     const std::string &comment = tok->str();
-    if (comment.size() < 19)
+    if (comment.size() < cppchecksuppress.size())
         return false;
     const std::string::size_type pos1 = comment.find_first_not_of("/* \t");
     if (pos1 == std::string::npos)
         return false;
-    if (pos1 + 17 >= comment.size())
+    if (pos1 + cppchecksuppress.size() >= comment.size())
         return false;
-    if (comment.compare(pos1, 17, "cppcheck-suppress") != 0)
+    if (comment.substr(pos1, cppchecksuppress.size()) != cppchecksuppress)
         return false;
 
     // skip spaces after "cppcheck-suppress"
@@ -130,7 +132,7 @@ static bool parseInlineSuppressionCommentToken(const simplecpp::Token *tok, std:
 
 static void inlineSuppressions(const simplecpp::TokenList &tokens, Settings &mSettings, std::list<BadInlineSuppression> *bad)
 {
-    for (const simplecpp::Token *tok = tokens.cfront(); tok; tok = tok ? tok->next : nullptr) {
+    for (const simplecpp::Token *tok = tokens.cfront(); tok; tok = tok->next) {
         if (!tok->comment)
             continue;
 
@@ -164,10 +166,20 @@ static void inlineSuppressions(const simplecpp::TokenList &tokens, Settings &mSe
         }
         relativeFilename = Path::simplifyPath(relativeFilename);
 
+        // special handling when suppressing { warnings for backwards compatibility
+        const bool thisAndNextLine = tok->previous &&
+                                     tok->previous->previous &&
+                                     tok->next &&
+                                     !sameline(tok->previous->previous, tok->previous) &&
+                                     tok->location.line + 1 == tok->next->location.line &&
+                                     tok->location.fileIndex == tok->next->location.fileIndex &&
+                                     tok->previous->str() == "{";
+
         // Add the suppressions.
         for (Suppressions::Suppression &suppr : inlineSuppressions) {
             suppr.fileName = relativeFilename;
             suppr.lineNumber = tok->location.line;
+            suppr.thisAndNextLine = thisAndNextLine;
             mSettings.nomsg.addSuppression(suppr);
         }
     }
@@ -616,7 +628,7 @@ static bool hasErrors(const simplecpp::OutputList &outputList)
         case simplecpp::Output::MISSING_HEADER:
         case simplecpp::Output::PORTABILITY_BACKSLASH:
             break;
-        };
+        }
     }
     return false;
 }
@@ -638,7 +650,7 @@ void Preprocessor::handleErrors(const simplecpp::OutputList& outputList, bool th
             case simplecpp::Output::MISSING_HEADER:
             case simplecpp::Output::PORTABILITY_BACKSLASH:
                 break;
-            };
+            }
         }
     }
 }
@@ -655,9 +667,9 @@ bool Preprocessor::loadFiles(const simplecpp::TokenList &rawtokens, std::vector<
 
 void Preprocessor::removeComments()
 {
-    for (std::map<std::string, simplecpp::TokenList*>::iterator it = mTokenLists.begin(); it != mTokenLists.end(); ++it) {
-        if (it->second)
-            it->second->removeComments();
+    for (std::pair<const std::string, simplecpp::TokenList*>& tokenList : mTokenLists) {
+        if (tokenList.second)
+            tokenList.second->removeComments();
     }
 }
 
@@ -780,23 +792,23 @@ void Preprocessor::reportOutput(const simplecpp::OutputList &outputList, bool sh
         case simplecpp::Output::EXPLICIT_INCLUDE_NOT_FOUND:
             error(emptyString, 0, out.msg);
             break;
-        };
+        }
     }
 }
 
 void Preprocessor::error(const std::string &filename, unsigned int linenr, const std::string &msg)
 {
-    std::list<ErrorLogger::ErrorMessage::FileLocation> locationList;
+    std::list<ErrorMessage::FileLocation> locationList;
     if (!filename.empty()) {
-        const ErrorLogger::ErrorMessage::FileLocation loc(filename, linenr, 0);
+        const ErrorMessage::FileLocation loc(filename, linenr, 0);
         locationList.push_back(loc);
     }
-    mErrorLogger->reportErr(ErrorLogger::ErrorMessage(locationList,
-                            mFile0,
-                            Severity::error,
-                            msg,
-                            "preprocessorErrorDirective",
-                            false));
+    mErrorLogger->reportErr(ErrorMessage(locationList,
+                                         mFile0,
+                                         Severity::error,
+                                         msg,
+                                         "preprocessorErrorDirective",
+                                         false));
 }
 
 // Report that include is missing
@@ -819,19 +831,19 @@ void Preprocessor::missingInclude(const std::string &filename, unsigned int line
         missingIncludeFlag = true;
     if (mErrorLogger && mSettings.checkConfiguration) {
 
-        std::list<ErrorLogger::ErrorMessage::FileLocation> locationList;
+        std::list<ErrorMessage::FileLocation> locationList;
         if (!filename.empty()) {
-            ErrorLogger::ErrorMessage::FileLocation loc;
+            ErrorMessage::FileLocation loc;
             loc.line = linenr;
             loc.setfile(Path::toNativeSeparators(filename));
             locationList.push_back(loc);
         }
-        ErrorLogger::ErrorMessage errmsg(locationList, mFile0, Severity::information,
-                                         (headerType==SystemHeader) ?
-                                         "Include file: <" + header + "> not found. Please note: Cppcheck does not need standard library headers to get proper results." :
-                                         "Include file: \"" + header + "\" not found.",
-                                         (headerType==SystemHeader) ? "missingIncludeSystem" : "missingInclude",
-                                         false);
+        ErrorMessage errmsg(locationList, mFile0, Severity::information,
+                            (headerType==SystemHeader) ?
+                            "Include file: <" + header + "> not found. Please note: Cppcheck does not need standard library headers to get proper results." :
+                            "Include file: \"" + header + "\" not found.",
+                            (headerType==SystemHeader) ? "missingIncludeSystem" : "missingInclude",
+                            false);
         mErrorLogger->reportInfo(errmsg);
     }
 }
@@ -869,10 +881,10 @@ bool Preprocessor::validateCfg(const std::string &cfg, const std::list<simplecpp
 void Preprocessor::validateCfgError(const std::string &file, const unsigned int line, const std::string &cfg, const std::string &macro)
 {
     const std::string id = "ConfigurationNotChecked";
-    std::list<ErrorLogger::ErrorMessage::FileLocation> locationList;
-    const ErrorLogger::ErrorMessage::FileLocation loc(file, line, 0);
+    std::list<ErrorMessage::FileLocation> locationList;
+    const ErrorMessage::FileLocation loc(file, line, 0);
     locationList.push_back(loc);
-    const ErrorLogger::ErrorMessage errmsg(locationList, mFile0, Severity::information, "Skipping configuration '" + cfg + "' since the value of '" + macro + "' is unknown. Use -D if you want to check it. You can use -U to skip it explicitly.", id, false);
+    const ErrorMessage errmsg(locationList, mFile0, Severity::information, "Skipping configuration '" + cfg + "' since the value of '" + macro + "' is unknown. Use -D if you want to check it. You can use -U to skip it explicitly.", id, false);
     mErrorLogger->reportInfo(errmsg);
 }
 
@@ -980,8 +992,8 @@ unsigned int Preprocessor::calculateChecksum(const simplecpp::TokenList &tokens1
 void Preprocessor::simplifyPragmaAsm(simplecpp::TokenList *tokenList)
 {
     Preprocessor::simplifyPragmaAsmPrivate(tokenList);
-    for (std::map<std::string, simplecpp::TokenList *>::iterator it = mTokenLists.begin(); it != mTokenLists.end(); ++it) {
-        Preprocessor::simplifyPragmaAsmPrivate(it->second);
+    for (std::pair<const std::string, simplecpp::TokenList *>& list : mTokenLists) {
+        Preprocessor::simplifyPragmaAsmPrivate(list.second);
     }
 }
 

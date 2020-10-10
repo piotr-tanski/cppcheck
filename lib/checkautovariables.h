@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,13 +24,15 @@
 
 #include "check.h"
 #include "config.h"
+#include "errortypes.h"
 
 #include <string>
 
-class ErrorLogger;
 class Settings;
 class Token;
 class Tokenizer;
+class ErrorLogger;
+class Variable;
 
 /// @addtogroup Checks
 /** @brief Various small checks for automatic variables */
@@ -62,6 +64,11 @@ public:
     /** Check auto variables */
     void autoVariables();
 
+    /**
+     * Check variable assignment.. value must be changed later or there will be a error reported
+     * @return true if error is reported */
+    bool checkAutoVariableAssignment(const Token *expr, bool inconclusive, const Token *startToken = nullptr);
+
     void checkVarLifetime();
 
     void checkVarLifetimeScope(const Token * start, const Token * end);
@@ -77,6 +84,7 @@ private:
     void errorDanglingTemporaryLifetime(const Token* tok, const ValueFlow::Value* val);
     void errorReturnReference(const Token* tok, ErrorPath errorPath, bool inconclusive);
     void errorDanglingReference(const Token *tok, const Variable *var, ErrorPath errorPath);
+    void errorDanglingTempReference(const Token* tok, ErrorPath errorPath, bool inconclusive);
     void errorReturnTempReference(const Token* tok, ErrorPath errorPath, bool inconclusive);
     void errorInvalidDeallocation(const Token *tok, const ValueFlow::Value *val);
     void errorReturnAddressOfFunctionParameter(const Token *tok, const std::string &varname);
@@ -92,6 +100,7 @@ private:
         c.errorReturnReference(nullptr, errorPath, false);
         c.errorDanglingReference(nullptr, nullptr, errorPath);
         c.errorReturnTempReference(nullptr, errorPath, false);
+        c.errorDanglingTempReference(nullptr, errorPath, false);
         c.errorInvalidDeallocation(nullptr, nullptr);
         c.errorReturnAddressOfFunctionParameter(nullptr, "parameter");
         c.errorUselessAssignmentArg(nullptr);

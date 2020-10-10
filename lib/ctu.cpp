@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,7 +20,10 @@
 //---------------------------------------------------------------------------
 #include "ctu.h"
 #include "astutils.h"
+#include "settings.h"
 #include "symboldatabase.h"
+#include "tokenize.h"
+
 #include <tinyxml2.h>
 #include <iterator>  // back_inserter
 //---------------------------------------------------------------------------
@@ -98,7 +101,7 @@ std::string CTU::FileInfo::FunctionCall::toXmlString() const
         out << "/>";
     else {
         out << ">\n";
-        for (const ErrorLogger::ErrorMessage::FileLocation &loc : callValuePath)
+        for (const ErrorMessage::FileLocation &loc : callValuePath)
             out << "  <path"
                 << " " << ATTR_LOC_FILENAME << "=\"" << loc.getfile() << "\""
                 << " " << ATTR_LOC_LINENR << "=\"" << loc.line << "\""
@@ -199,7 +202,7 @@ bool CTU::FileInfo::FunctionCall::loadFromXml(const tinyxml2::XMLElement *xmlEle
     for (const tinyxml2::XMLElement *e2 = xmlElement->FirstChildElement(); !error && e2; e2 = e2->NextSiblingElement()) {
         if (std::strcmp(e2->Name(), "path") != 0)
             continue;
-        ErrorLogger::ErrorMessage::FileLocation loc;
+        ErrorMessage::FileLocation loc;
         loc.setfile(readAttrString(e2, ATTR_LOC_FILENAME, &error));
         loc.line = readAttrInt(e2, ATTR_LOC_LINENR, &error);
         loc.column = readAttrInt(e2, ATTR_LOC_COLUMN, &error);
@@ -334,7 +337,7 @@ CTU::FileInfo *CTU::getFileInfo(const Tokenizer *tokenizer)
                     functionCall.callArgValue = value.intvalue;
                     functionCall.warning = !value.errorSeverity();
                     for (const ErrorPathItem &i : value.errorPath) {
-                        ErrorLogger::ErrorMessage::FileLocation loc;
+                        ErrorMessage::FileLocation loc;
                         loc.setfile(tokenizer->list.file(i.first));
                         loc.line = i.first->linenr();
                         loc.column = i.first->column();
@@ -421,7 +424,10 @@ static std::list<std::pair<const Token *, MathLib::bigint>> getUnsafeFunction(co
             tok2 = tok2->linkAt(1);
             if (Token::findmatch(tok2->link(), "return|throw", tok2))
                 return ret;
-            if (isVariableChanged(tok2->link(), tok2, argvar->declarationId(), false, settings, tokenizer->isCPP()))
+            int indirect = 0;
+            if (argvar->valueType())
+                indirect = argvar->valueType()->pointer;
+            if (isVariableChanged(tok2->link(), tok2, indirect, argvar->declarationId(), false, settings, tokenizer->isCPP()))
                 return ret;
         }
         if (Token::Match(tok2, "%oror%|&&|?")) {
@@ -503,7 +509,7 @@ static bool findPath(const std::string &callId,
                 if (unsafeValue < 0 || unsafeValue >= functionCall->callArgValue)
                     break;
                 continue;
-            };
+            }
             path[index] = functionCall;
             return true;
         }
@@ -521,14 +527,14 @@ static bool findPath(const std::string &callId,
     return false;
 }
 
-std::list<ErrorLogger::ErrorMessage::FileLocation> CTU::FileInfo::getErrorPath(InvalidValueType invalidValue,
+std::list<ErrorMessage::FileLocation> CTU::FileInfo::getErrorPath(InvalidValueType invalidValue,
         const CTU::FileInfo::UnsafeUsage &unsafeUsage,
         const std::map<std::string, std::list<const CTU::FileInfo::CallBase *>> &callsMap,
         const char info[],
         const FunctionCall * * const functionCallPtr,
         bool warning) const
 {
-    std::list<ErrorLogger::ErrorMessage::FileLocation> locationList;
+    std::list<ErrorMessage::FileLocation> locationList;
 
     const CTU::FileInfo::CallBase *path[10] = {nullptr};
 
@@ -549,12 +555,12 @@ std::list<ErrorLogger::ErrorMessage::FileLocation> CTU::FileInfo::getErrorPath(I
             std::copy(functionCall->callValuePath.cbegin(), functionCall->callValuePath.cend(), std::back_inserter(locationList));
         }
 
-        ErrorLogger::ErrorMessage::FileLocation fileLoc(path[index]->location.fileName, path[index]->location.lineNumber, path[index]->location.column);
+        ErrorMessage::FileLocation fileLoc(path[index]->location.fileName, path[index]->location.lineNumber, path[index]->location.column);
         fileLoc.setinfo("Calling function " + path[index]->callFunctionName + ", " + MathLib::toString(path[index]->callArgNr) + getOrdinalText(path[index]->callArgNr) + " argument is " + value1);
         locationList.push_back(fileLoc);
     }
 
-    ErrorLogger::ErrorMessage::FileLocation fileLoc2(unsafeUsage.location.fileName, unsafeUsage.location.lineNumber, unsafeUsage.location.column);
+    ErrorMessage::FileLocation fileLoc2(unsafeUsage.location.fileName, unsafeUsage.location.lineNumber, unsafeUsage.location.column);
     fileLoc2.setinfo(replaceStr(info, "ARG", unsafeUsage.myArgumentName));
     locationList.push_back(fileLoc2);
 

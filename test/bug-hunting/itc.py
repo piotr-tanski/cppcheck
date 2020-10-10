@@ -16,12 +16,13 @@ else:
     CPPCHECK_PATH = '../../cppcheck'
 
 if len(sys.argv) >= 2 and sys.argv[-1] != '--clang':
-    TESTFILE = sys.argv[-1]
-    if not os.path.isfile(TESTFILE):
-        print(f'ERROR: {TESTFILE} is not a file')
-        sys.exit(1)
+    TESTFILES = [sys.argv[-1]]
 else:
-    TESTFILE = os.path.expanduser('~/itc/01.w_Defects/zero_division.c')
+    TESTFILES = [os.path.expanduser('~/itc/01.w_Defects/zero_division.c'),
+                 os.path.expanduser('~/itc/01.w_Defects/uninit_var.c')]
+if not os.path.isfile(TESTFILES[0]):
+    print('ERROR: %s is not a file' % TESTFILES[0])
+    sys.exit(1)
 
 RUN_CLANG = ('--clang' in sys.argv)
 
@@ -31,7 +32,13 @@ def get_error_lines(filename):
     lines = f.readlines()
     for linenr, line in enumerate(lines):
         if line.find('/* ERROR:') > 0 or line.find('/*ERROR:') > 0:
-            ret.append(linenr+1)
+            linenr += 1
+            if testfile.find('uninit_') >= 0:
+                if linenr == 177:
+                    linenr = 176
+                elif linenr == 241:
+                    linenr = 242 # warn about usage
+            ret.append(linenr)
     return ret
 
 def check(filename):
@@ -40,8 +47,7 @@ def check(filename):
            '--platform=unix64',
            filename]
     if RUN_CLANG:
-        cmd += ['--clang', '--cppcheck-build-dir=itc-build-dir']
-        os.mkdir('itc-build-dir')
+        cmd.append('--clang')
     print(' '.join(cmd))
 
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -52,9 +58,12 @@ def check(filename):
     if RUN_CLANG:
         shutil.rmtree('itc-build-dir')
 
-    w = r'.*zero_division.c:([0-9]+):[0-9]+: error: There is division.*'
-    if TESTFILE.find('uninit_') > 0:
-        w = r'.*c:([0-9]+):[0-9]+: error: .*verificationUninit.*'
+    if filename.find('zero_division.c') >= 0:
+        w = r'.*zero_division.c:([0-9]+):[0-9]+: error: There is division.*'
+    elif filename.find('uninit_') >= 0:
+        w = r'.*c:([0-9]+):[0-9]+: error: .*bughuntingUninit.*'
+    else:
+        w = r'.*c:([0-9]+):[0-9]+: error: .*bughunting.*'
 
     ret = []
     for line in stderr.split('\n'):
@@ -66,15 +75,17 @@ def check(filename):
             ret.append(linenr)
     return ret
 
-wanted = get_error_lines(TESTFILE)
-actual = check(TESTFILE)
-print('wanted:' + str(wanted))
-print('actual:' + str(actual))
-missing = []
-for w in wanted:
-    if w not in actual:
-        missing.append(w);
-print('missing:' + str(missing))
-
+for testfile in TESTFILES:
+    wanted = get_error_lines(testfile)
+    actual = check(testfile)
+    missing = []
+    for w in wanted:
+        if w not in actual:
+            missing.append(w);
+    if len(missing) > 0:
+        print('wanted:' + str(wanted))
+        print('actual:' + str(actual))
+        print('missing:' + str(missing))
+        sys.exit(1)
 
 

@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,21 +20,17 @@
 #include "checkmemoryleak.h"
 
 #include "astutils.h"
+#include "errorlogger.h"
 #include "library.h"
-#include "mathlib.h"
 #include "settings.h"
-#include "standards.h"
 #include "symboldatabase.h"
 #include "token.h"
 #include "tokenize.h"
-#include "tokenlist.h"
 #include "utils.h"
-#include "valueflow.h"
 
 #include <algorithm>
 #include <cstddef>
 #include <set>
-#include <stack>
 
 //---------------------------------------------------------------------------
 
@@ -301,7 +297,7 @@ void CheckMemoryLeak::reportErr(const Token *tok, Severity::SeverityType severit
 
 void CheckMemoryLeak::reportErr(const std::list<const Token *> &callstack, Severity::SeverityType severity, const std::string &id, const std::string &msg, const CWE &cwe) const
 {
-    const ErrorLogger::ErrorMessage errmsg(callstack, mTokenizer_ ? &mTokenizer_->list : nullptr, severity, id, msg, cwe, false);
+    const ErrorMessage errmsg(callstack, mTokenizer_ ? &mTokenizer_->list : nullptr, severity, id, msg, cwe, false);
     if (mErrorLogger_)
         mErrorLogger_->reportErr(errmsg);
     else
@@ -551,8 +547,13 @@ void CheckMemoryLeakInFunction::checkReallocUsage()
 
                 // Check that another copy of the pointer wasn't saved earlier in the function
                 if (Token::findmatch(scope->bodyStart, "%name% = %varid% ;", tok, tok->varId()) ||
-                    Token::findmatch(scope->bodyStart, "[{};] %varid% = *| %name% .| %name%| [;=]", tok, tok->varId()))
+                    Token::findmatch(scope->bodyStart, "[{};] %varid% = *| %var% .| %var%| [;=]", tok, tok->varId()))
                     continue;
+
+                // Check if the argument is known to be null, which means it is not a memory leak
+                if (arg->hasKnownIntValue() && arg->getKnownIntValue() == 0) {
+                    continue;
+                }
 
                 const Token* tokEndRealloc = reallocTok->linkAt(1);
                 // Check that the allocation isn't followed immediately by an 'if (!var) { error(); }' that might handle failure
@@ -767,6 +768,8 @@ void CheckMemoryLeakStructMember::check()
         if (!var || !var->isLocal() || var->isStatic() || var->isReference())
             continue;
         if (var->typeEndToken()->isStandardType())
+            continue;
+        if (var->scope()->hasInlineOrLambdaFunction())
             continue;
         checkStructVariable(var);
     }

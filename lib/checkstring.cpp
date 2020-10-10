@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,6 @@
 #include "checkstring.h"
 
 #include "astutils.h"
-#include "errorlogger.h"
 #include "mathlib.h"
 #include "settings.h"
 #include "symboldatabase.h"
@@ -180,6 +179,9 @@ void CheckString::checkSuspiciousStringCompare()
             if (Token::Match(varTok, "%char%|%num%|%str%"))
                 std::swap(varTok, litTok);
             else if (!Token::Match(litTok, "%char%|%num%|%str%"))
+                continue;
+
+            if (mTokenizer->isCPP() && (!varTok->valueType() || !varTok->valueType()->isIntegral()))
                 continue;
 
             // Pointer addition?
@@ -353,37 +355,32 @@ void CheckString::overlappingStrcmp()
                 continue;
             std::list<const Token *> equals0;
             std::list<const Token *> notEquals0;
-            std::stack<const Token *> tokens;
-            tokens.push(tok);
-            while (!tokens.empty()) {
-                const Token * const t = tokens.top();
-                tokens.pop();
+            visitAstNodes(tok, [&](const Token * t) {
                 if (!t)
-                    continue;
+                    return ChildrenToVisit::none;
                 if (t->str() == "||") {
-                    tokens.push(t->astOperand1());
-                    tokens.push(t->astOperand2());
-                    continue;
+                    return ChildrenToVisit::op1_and_op2;
                 }
                 if (t->str() == "==") {
                     if (Token::simpleMatch(t->astOperand1(), "(") && Token::simpleMatch(t->astOperand2(), "0"))
                         equals0.push_back(t->astOperand1());
                     else if (Token::simpleMatch(t->astOperand2(), "(") && Token::simpleMatch(t->astOperand1(), "0"))
                         equals0.push_back(t->astOperand2());
-                    continue;
+                    return ChildrenToVisit::none;
                 }
                 if (t->str() == "!=") {
                     if (Token::simpleMatch(t->astOperand1(), "(") && Token::simpleMatch(t->astOperand2(), "0"))
                         notEquals0.push_back(t->astOperand1());
                     else if (Token::simpleMatch(t->astOperand2(), "(") && Token::simpleMatch(t->astOperand1(), "0"))
                         notEquals0.push_back(t->astOperand2());
-                    continue;
+                    return ChildrenToVisit::none;
                 }
                 if (t->str() == "!" && Token::simpleMatch(t->astOperand1(), "("))
                     equals0.push_back(t->astOperand1());
                 else if (t->str() == "(")
                     notEquals0.push_back(t);
-            }
+                return ChildrenToVisit::none;
+            });
 
             for (const Token *eq0 : equals0) {
                 for (const Token * ne0 : notEquals0) {

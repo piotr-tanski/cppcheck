@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,13 +23,13 @@
 #include "checkbufferoverrun.h"
 
 #include "astutils.h"
+#include "errorlogger.h"
 #include "library.h"
 #include "mathlib.h"
 #include "settings.h"
 #include "symboldatabase.h"
 #include "token.h"
 #include "tokenize.h"
-#include "tokenlist.h"
 #include "utils.h"
 #include "valueflow.h"
 
@@ -38,8 +38,6 @@
 #include <cstdlib>
 #include <numeric> // std::accumulate
 #include <sstream>
-#include <stack>
-#include <utility>
 
 //---------------------------------------------------------------------------
 
@@ -568,7 +566,7 @@ static bool checkBufferSize(const Token *ftok, const Library::ArgumentChecks::Mi
         return minsize.value <= bufferSize;
     case Library::ArgumentChecks::MinSize::Type::NONE:
         break;
-    };
+    }
     return true;
 }
 
@@ -850,7 +848,7 @@ bool CheckBufferOverrun::analyseWholeProgram1(const CTU::FileInfo *ctu, const st
 {
     const CTU::FileInfo::FunctionCall *functionCall = nullptr;
 
-    const std::list<ErrorLogger::ErrorMessage::FileLocation> &locationList =
+    const std::list<ErrorMessage::FileLocation> &locationList =
         ctu->getErrorPath(CTU::FileInfo::InvalidValueType::bufferOverflow,
                           unsafeUsage,
                           callsMap,
@@ -877,12 +875,12 @@ bool CheckBufferOverrun::analyseWholeProgram1(const CTU::FileInfo *ctu, const st
         cwe = CWE_POINTER_ARITHMETIC_OVERFLOW;
     }
 
-    const ErrorLogger::ErrorMessage errorMessage(locationList,
-            emptyString,
-            Severity::error,
-            errmsg,
-            errorId,
-            cwe, false);
+    const ErrorMessage errorMessage(locationList,
+                                    emptyString,
+                                    Severity::error,
+                                    errmsg,
+                                    errorId,
+                                    cwe, false);
     errorLogger.reportErr(errorMessage);
 
     return true;

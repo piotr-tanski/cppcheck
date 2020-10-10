@@ -3,20 +3,32 @@
 #include "token.h"
 #include "astutils.h"
 #include "symboldatabase.h"
+#include <algorithm>
 #include <cassert>
+#include <memory>
 
 void ProgramMemory::setValue(nonneg int varid, const ValueFlow::Value &value)
 {
     values[varid] = value;
 }
+const ValueFlow::Value* ProgramMemory::getValue(nonneg int varid) const
+{
+    const ProgramMemory::Map::const_iterator it = values.find(varid);
+    const bool found = it != values.end() && !it->second.isImpossible();
+    if (found)
+        return &it->second;
+    else
+        return nullptr;
+}
 
 bool ProgramMemory::getIntValue(nonneg int varid, MathLib::bigint* result) const
 {
-    const ProgramMemory::Map::const_iterator it = values.find(varid);
-    const bool found = it != values.end() && it->second.isIntValue();
-    if (found)
-        *result = it->second.intvalue;
-    return found;
+    const ValueFlow::Value* value = getValue(varid);
+    if (value && value->isIntValue()) {
+        *result = value->intvalue;
+        return true;
+    }
+    return false;
 }
 
 void ProgramMemory::setIntValue(nonneg int varid, MathLib::bigint value)
@@ -26,11 +38,22 @@ void ProgramMemory::setIntValue(nonneg int varid, MathLib::bigint value)
 
 bool ProgramMemory::getTokValue(nonneg int varid, const Token** result) const
 {
-    const ProgramMemory::Map::const_iterator it = values.find(varid);
-    const bool found = it != values.end() && it->second.isTokValue();
-    if (found)
-        *result = it->second.tokvalue;
-    return found;
+    const ValueFlow::Value* value = getValue(varid);
+    if (value && value->isTokValue()) {
+        *result = value->tokvalue;
+        return true;
+    }
+    return false;
+}
+
+bool ProgramMemory::getContainerSizeValue(nonneg int varid, MathLib::bigint* result) const
+{
+    const ValueFlow::Value* value = getValue(varid);
+    if (value && value->isContainerSizeValue()) {
+        *result = value->intvalue;
+        return true;
+    }
+    return false;
 }
 
 void ProgramMemory::setUnknown(nonneg int varid)
@@ -199,6 +222,10 @@ static void fillProgramMemoryFromAssignments(ProgramMemory& pm, const Token* tok
                 else
                     pm.setUnknown(vartok->varId());
             }
+        } else if (!setvar && Token::Match(tok2, "%var% !!=") && isVariableChanged(tok2, 0, nullptr, true)) {
+            const Token *vartok = tok2;
+            if (!pm.hasValue(vartok->varId()))
+                pm.setUnknown(vartok->varId());
         }
 
         if (tok2->str() == "{") {
@@ -528,6 +555,24 @@ void execute(const Token *expr,
             *result = 0;
         else
             *error = true;
+    } else if (Token::Match(expr->tokAt(-3), "%var% . %name% (")) {
+        const Token* containerTok = expr->tokAt(-3);
+        if (astIsContainer(containerTok)) {
+            Library::Container::Yield yield = containerTok->valueType()->container->getYield(expr->strAt(-1));
+            if (yield == Library::Container::Yield::SIZE) {
+                if (!programMemory->getContainerSizeValue(containerTok->varId(), result))
+                    *error = true;
+            } else if (yield == Library::Container::Yield::EMPTY) {
+                MathLib::bigint size = 0;
+                if (!programMemory->getContainerSizeValue(containerTok->varId(), &size))
+                    *error = true;
+                *result = (size == 0);
+            } else {
+                *error = true;
+            }
+        } else {
+            *error = true;
+        }
     }
 
     else

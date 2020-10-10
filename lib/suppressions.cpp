@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -29,8 +29,6 @@
 #include <cctype>   // std::isdigit, std::isalnum, etc
 #include <sstream>
 #include <utility>
-
-class ErrorLogger;
 
 static bool isAcceptedErrorIdChar(char c)
 {
@@ -87,7 +85,7 @@ std::string Suppressions::parseXmlFile(const char *filename)
     const tinyxml2::XMLElement * const rootnode = doc.FirstChildElement();
     for (const tinyxml2::XMLElement * e = rootnode->FirstChildElement(); e; e = e->NextSiblingElement()) {
         if (std::strcmp(e->Name(), "suppress") != 0)
-            return "Invalid suppression xml file format, expected <suppress> element but got a <" + std::string(e->Name()) + '>';
+            return "Invalid suppression xml file format, expected <suppress> element but got a \"" + std::string(e->Name()) + '\"';
 
         Suppression s;
         for (const tinyxml2::XMLElement * e2 = e->FirstChildElement(); e2; e2 = e2->NextSiblingElement()) {
@@ -100,8 +98,10 @@ std::string Suppressions::parseXmlFile(const char *filename)
                 s.lineNumber = std::atoi(text);
             else if (std::strcmp(e2->Name(), "symbolName") == 0)
                 s.symbolName = text;
+            else if (*text && std::strcmp(e2->Name(), "hash") == 0)
+                std::istringstream(text) >> s.hash;
             else
-                return "Unknown suppression element <" + std::string(e2->Name()) + ">, expected <id>/<fileName>/<lineNumber>/<symbolName>";
+                return "Unknown suppression element \"" + std::string(e2->Name()) + "\", expected id/fileName/lineNumber/symbolName/hash";
         }
 
         const std::string err = addSuppression(s);
@@ -169,8 +169,20 @@ std::vector<Suppressions::Suppression> Suppressions::parseMultiSuppressComment(c
 
 std::string Suppressions::addSuppressionLine(const std::string &line)
 {
-    std::istringstream lineStream(line);
+    std::istringstream lineStream;
     Suppressions::Suppression suppression;
+
+    // Strip any end of line comments
+    std::string::size_type endpos = std::min(line.find("#"), line.find("//"));
+    if (endpos != std::string::npos) {
+        while (endpos > 0 && std::isspace(line[endpos-1])) {
+            endpos--;
+        }
+        lineStream.str(line.substr(0, endpos));
+    } else {
+        lineStream.str(line);
+    }
+
     if (std::getline(lineStream, suppression.errorId, ':')) {
         if (std::getline(lineStream, suppression.fileName)) {
             // If there is not a dot after the last colon in "file" then
@@ -206,9 +218,9 @@ std::string Suppressions::addSuppressionLine(const std::string &line)
 std::string Suppressions::addSuppression(const Suppressions::Suppression &suppression)
 {
     // Check that errorId is valid..
-    if (suppression.errorId.empty()) {
+    if (suppression.errorId.empty() && suppression.hash == 0)
         return "Failed to add suppression. No id.";
-    }
+
     if (suppression.errorId != "*") {
         for (std::string::size_type pos = 0; pos < suppression.errorId.length(); ++pos) {
             if (suppression.errorId[pos] < 0 || !isAcceptedErrorIdChar(suppression.errorId[pos])) {
@@ -273,12 +285,16 @@ bool Suppressions::Suppression::parseComment(std::string comment, std::string *e
 
 bool Suppressions::Suppression::isSuppressed(const Suppressions::ErrorMessage &errmsg) const
 {
+    if (hash > 0 && hash != errmsg.hash)
+        return false;
     if (!errorId.empty() && !matchglob(errorId, errmsg.errorId))
         return false;
     if (!fileName.empty() && !matchglob(fileName, errmsg.getFileName()))
         return false;
-    if (lineNumber != NO_LINE && lineNumber != errmsg.lineNumber)
-        return false;
+    if (lineNumber != NO_LINE && lineNumber != errmsg.lineNumber) {
+        if (!thisAndNextLine || lineNumber + 1 != errmsg.lineNumber)
+            return false;
+    }
     if (!symbolName.empty()) {
         for (std::string::size_type pos = 0; pos < errmsg.symbolNames.size();) {
             const std::string::size_type pos2 = errmsg.symbolNames.find('\n',pos);
@@ -317,6 +333,8 @@ std::string Suppressions::Suppression::getText() const
         ret += " lineNumber=" + MathLib::toString(lineNumber);
     if (!symbolName.empty())
         ret += " symbolName=" + symbolName;
+    if (hash > 0)
+        ret += " hash=" + MathLib::toString(hash);
     if (ret.compare(0,1," ")==0)
         return ret.substr(1);
     return ret;
@@ -360,22 +378,25 @@ void Suppressions::dump(std::ostream & out) const
             out << " lineNumber=\"" << suppression.lineNumber << '"';
         if (!suppression.symbolName.empty())
             out << " symbolName=\"" << ErrorLogger::toxml(suppression.symbolName) << '\"';
+        if (suppression.hash > 0)
+            out << " hash=\"" << suppression.hash << '\"';
         out << " />" << std::endl;
     }
     out << "  </suppressions>" << std::endl;
 }
 
-#include <iostream>
-
 std::list<Suppressions::Suppression> Suppressions::getUnmatchedLocalSuppressions(const std::string &file, const bool unusedFunctionChecking) const
 {
+    std::string tmpFile = Path::simplifyPath(file);
     std::list<Suppression> result;
     for (const Suppression &s : mSuppressions) {
         if (s.matched)
             continue;
+        if (s.hash > 0)
+            continue;
         if (!unusedFunctionChecking && s.errorId == "unusedFunction")
             continue;
-        if (file.empty() || !s.isLocal() || s.fileName != file)
+        if (tmpFile.empty() || !s.isLocal() || s.fileName != tmpFile)
             continue;
         result.push_back(s);
     }
@@ -387,6 +408,8 @@ std::list<Suppressions::Suppression> Suppressions::getUnmatchedGlobalSuppression
     std::list<Suppression> result;
     for (const Suppression &s : mSuppressions) {
         if (s.matched)
+            continue;
+        if (s.hash > 0)
             continue;
         if (!unusedFunctionChecking && s.errorId == "unusedFunction")
             continue;

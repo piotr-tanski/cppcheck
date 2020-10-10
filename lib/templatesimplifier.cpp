@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -147,10 +147,10 @@ TemplateSimplifier::TokenAndName::TokenAndName(Token *token, const std::string &
         if ((isFunction() || isClass()) && mNameToken->strAt(-1) == "::") {
             const Token * start = mNameToken;
 
-            while (Token::Match(start->tokAt(-2), "%name% ::") ||
-                   (Token::simpleMatch(start->tokAt(-2), "> ::") &&
-                    start->tokAt(-2)->findOpeningBracket() &&
-                    Token::Match(start->tokAt(-2)->findOpeningBracket()->previous(), "%name% <"))) {
+            while (start && (Token::Match(start->tokAt(-2), "%name% ::") ||
+                             (Token::simpleMatch(start->tokAt(-2), "> ::") &&
+                              start->tokAt(-2)->findOpeningBracket() &&
+                              Token::Match(start->tokAt(-2)->findOpeningBracket()->previous(), "%name% <")))) {
                 if (start->strAt(-2) == ">")
                     start = start->tokAt(-2)->findOpeningBracket()->previous();
                 else
@@ -195,8 +195,8 @@ TemplateSimplifier::TokenAndName::TokenAndName(const TokenAndName& other) :
 
 TemplateSimplifier::TokenAndName::~TokenAndName()
 {
-    if (mToken)
-        mToken->templateSimplifierPointers().erase(this);
+    if (mToken && mToken->templateSimplifierPointers())
+        mToken->templateSimplifierPointers()->erase(this);
 }
 
 const Token * TemplateSimplifier::TokenAndName::aliasStartToken() const
@@ -242,6 +242,10 @@ void TemplateSimplifier::fixAngleBrackets()
             Token *endTok = tok->findClosingBracket();
             if (endTok && endTok->str() == ">>") {
                 endTok->str(">");
+                endTok->insertToken(">");
+            } else if (endTok && endTok->str() == ">>=") {
+                endTok->str(">");
+                endTok->insertToken("=");
                 endTok->insertToken(">");
             }
         } else if (Token::Match(tok, "class|struct|union|=|:|public|protected|private %name% <")) {
@@ -368,7 +372,7 @@ void TemplateSimplifier::checkComplicatedSyntaxErrorsInTemplates()
                         // @todo add better expression detection
                         if (!Token::Match(tok2->next(), "*| %type%|%num% ;"))
                             inclevel = true;
-                    } else if (tok2->next() && tok2->next()->isStandardType())
+                    } else if (tok2->next() && tok2->next()->isStandardType() && !Token::Match(tok2->tokAt(2), "(|{"))
                         inclevel = true;
                     else if (Token::simpleMatch(tok2, "< typename"))
                         inclevel = true;
@@ -432,7 +436,7 @@ unsigned int TemplateSimplifier::templateParameters(const Token *tok)
                 if (closing->str() == ">>")
                     return numberOfParameters;
                 tok = closing->next();
-                if (tok->str() == ">" || tok->str() == ">>")
+                if (Token::Match(tok, ">|>>|>>="))
                     return numberOfParameters;
                 else if (tok->str() == ",") {
                     ++numberOfParameters;
@@ -467,7 +471,7 @@ unsigned int TemplateSimplifier::templateParameters(const Token *tok)
                 if (level == 0)
                     return numberOfParameters;
                 --level;
-            } else if (tok->str() == ">>") {
+            } else if (tok->str() == ">>" || tok->str() == ">>=") {
                 if (level == 1)
                     return numberOfParameters;
                 level -= 2;
@@ -493,7 +497,7 @@ unsigned int TemplateSimplifier::templateParameters(const Token *tok)
                 return 0;
             if (tok->str() == ">" && level == 0)
                 return numberOfParameters;
-            else if (tok->str() == ">>" && level == 1)
+            else if ((tok->str() == ">>" || tok->str() == ">>=") && level == 1)
                 return numberOfParameters;
             else if (tok->str() == ",") {
                 if (level == 0)
@@ -550,11 +554,11 @@ unsigned int TemplateSimplifier::templateParameters(const Token *tok)
             return 0;
 
         // ,/>
-        while (Token::Match(tok, ">|>>")) {
+        while (Token::Match(tok, ">|>>|>>=")) {
             if (level == 0)
                 return tok->str() == ">" && !Token::Match(tok->next(), "%num%") ? numberOfParameters : 0;
             --level;
-            if (tok->str() == ">>") {
+            if (tok->str() == ">>" || tok->str() == ">>=") {
                 if (level == 0)
                     return !Token::Match(tok->next(), "%num%") ? numberOfParameters : 0;
                 --level;
@@ -765,7 +769,15 @@ void TemplateSimplifier::addInstantiation(Token *token, const std::string &scope
 {
     simplifyTemplateArgs(token->tokAt(2), token->next()->findClosingBracket());
 
-    mTemplateInstantiations.emplace_back(token, scope);
+    TokenAndName instantiation(token, scope);
+
+    // check if instantiation already exists before adding it
+    std::list<TokenAndName>::iterator it = std::find(mTemplateInstantiations.begin(),
+                                           mTemplateInstantiations.end(),
+                                           instantiation);
+
+    if (it == mTemplateInstantiations.end())
+        mTemplateInstantiations.emplace_back(instantiation);
 }
 
 void TemplateSimplifier::getTemplateInstantiations()
@@ -831,9 +843,7 @@ void TemplateSimplifier::getTemplateInstantiations()
             std::string qualification;
             Token * qualificationTok = tok;
             while (Token::Match(tok, "%name% :: %name%")) {
-                // ignore redundant namespaces
-                if (scopeName.find(tok->str()) == std::string::npos)
-                    qualification += (qualification.empty() ? "" : " :: ") + tok->str();
+                qualification += (qualification.empty() ? "" : " :: ") + tok->str();
                 tok = tok->tokAt(2);
             }
 
@@ -1117,7 +1127,7 @@ void TemplateSimplifier::useDefaultArgumentValues(TokenAndName &declaration)
                         (from->strAt(1) == ">" || (from->previous()->isName() &&
                                                    typeParameterNames.find(from->strAt(-1)) == typeParameterNames.end())))
                         ++indentlevel;
-                    else if (from->str() == ">")
+                    else if (from->str() == ">" && (links.empty() || links.top()->str() == "<" || indentlevel))
                         --indentlevel;
                     auto entry = typeParameterNames.find(from->str());
                     if (entry != typeParameterNames.end() && entry->second < instantiationArgs.size()) {
@@ -1352,7 +1362,7 @@ bool TemplateSimplifier::getTemplateNamePositionTemplateFunction(const Token *to
         // skip decltype(...)
         else if (Token::simpleMatch(tok->next(), "decltype (")) {
             const Token * end = tok->linkAt(2)->previous();
-            while (tok && tok->next() && tok != end) {
+            while (tok->next() && tok != end) {
                 tok = tok->next();
                 namepos++;
             }
@@ -1361,7 +1371,7 @@ bool TemplateSimplifier::getTemplateNamePositionTemplateFunction(const Token *to
             if (closing) {
                 if (closing->strAt(1) == "(" && Tokenizer::isFunctionHead(closing->next(), ";|{|:", true))
                     return true;
-                while (tok && tok->next() && tok->next() != closing) {
+                while (tok->next() && tok->next() != closing) {
                     tok = tok->next();
                     namepos++;
                 }
@@ -1384,7 +1394,7 @@ bool TemplateSimplifier::getTemplateNamePositionTemplateVariable(const Token *to
         // skip decltype(...)
         else if (Token::simpleMatch(tok->next(), "decltype (")) {
             const Token * end = tok->linkAt(2);
-            while (tok && tok->next() && tok != end) {
+            while (tok->next() && tok != end) {
                 tok = tok->next();
                 namepos++;
             }
@@ -1393,7 +1403,7 @@ bool TemplateSimplifier::getTemplateNamePositionTemplateVariable(const Token *to
             if (closing) {
                 if (Token::Match(closing->next(), "=|;"))
                     return true;
-                while (tok && tok->next() && tok->next() != closing) {
+                while (tok->next() && tok->next() != closing) {
                     tok = tok->next();
                     namepos++;
                 }
@@ -1535,7 +1545,7 @@ bool TemplateSimplifier::alreadyHasNamespace(const TokenAndName &templateDeclara
         pos += 2;
     }
 
-    return Token::simpleMatch(tok->tokAt(offset), scope.c_str()) ;
+    return Token::simpleMatch(tok->tokAt(offset), scope.c_str(), scope.size());
 }
 
 void TemplateSimplifier::expandTemplate(
@@ -1636,9 +1646,13 @@ void TemplateSimplifier::expandTemplate(
                 (!isVariable || !Token::Match(typeParametersInDeclaration[itype]->previous(), "<|, %type% >|,"))) {
                 typeindentlevel = 0;
                 std::stack<Token *> brackets1; // holds "(" and "{" tokens
+                bool pointerType = false;
+                Token * const dst1 = dst->previous();
                 for (const Token *typetok = mTypesUsedInTemplateInstantiation[itype].token();
                      typetok && (typeindentlevel > 0 || !Token::Match(typetok, ",|>"));
                      typetok = typetok->next()) {
+                    if (typeindentlevel == 0 && typetok->str() == "*")
+                        pointerType = true;
                     if (Token::simpleMatch(typetok, "..."))
                         continue;
                     if (Token::Match(typetok, "%name% <") && (typetok->strAt(2) == ">" || templateParameters(typetok->next())))
@@ -1674,6 +1688,10 @@ void TemplateSimplifier::expandTemplate(
                         brackets1.pop();
                     }
                 }
+                if (pointerType && Token::simpleMatch(dst1, "const")) {
+                    dst->insertToken("const", dst1->originalName(), true);
+                    dst1->deleteThis();
+                }
             } else {
                 if (isSpecialization && !copy && !scope.empty() && Token::Match(start, (scope + templateDeclarationNameToken->str()).c_str())) {
                     // skip scope
@@ -1706,7 +1724,7 @@ void TemplateSimplifier::expandTemplate(
                             }
                             // check if type is instantiated
                             for (const auto & inst : mTemplateInstantiations) {
-                                if (Token::simpleMatch(inst.token(), name.c_str())) {
+                                if (Token::simpleMatch(inst.token(), name.c_str(), name.size())) {
                                     // use the instantiated name
                                     dst->insertToken(name, "", true);
                                     start = closing;
@@ -1962,9 +1980,13 @@ void TemplateSimplifier::expandTemplate(
                 if (itype < typeParametersInDeclaration.size()) {
                     unsigned int typeindentlevel = 0;
                     std::stack<Token *> brackets1; // holds "(" and "{" tokens
+                    Token * const beforeTypeToken = mTokenList.back();
+                    bool pointerType = false;
                     for (const Token *typetok = mTypesUsedInTemplateInstantiation[itype].token();
                          typetok && (typeindentlevel > 0 || !Token::Match(typetok, ",|>"));
                          typetok = typetok->next()) {
+                        if (typeindentlevel == 0 && typetok->str() == "*")
+                            pointerType = true;
                         if (Token::simpleMatch(typetok, "..."))
                             continue;
                         if (Token::Match(typetok, "%name% <") &&
@@ -1974,6 +1996,9 @@ void TemplateSimplifier::expandTemplate(
                         } else if (typeindentlevel > 0 && typetok->str() == ">" && brackets1.top()->str() == "<") {
                             --typeindentlevel;
                             brackets1.pop();
+                        } else if (Token::Match(typetok, "const_cast|dynamic_cast|reinterpret_cast|static_cast <")) {
+                            brackets1.push(typetok->next());
+                            ++typeindentlevel;
                         } else if (typetok->str() == "(")
                             ++typeindentlevel;
                         else if (typetok->str() == ")")
@@ -2007,6 +2032,10 @@ void TemplateSimplifier::expandTemplate(
                         }
                         if (copy)
                             back->isTemplateArg(true);
+                    }
+                    if (pointerType && Token::simpleMatch(beforeTypeToken, "const")) {
+                        mTokenList.addtoken(beforeTypeToken);
+                        beforeTypeToken->deleteThis();
                     }
                     continue;
                 }
@@ -2259,7 +2288,7 @@ bool TemplateSimplifier::simplifyNumericCalculations(Token *tok, bool isTemplate
             case '^':
                 tok->str((v1 ^ v2).str());
                 break;
-            };
+            }
         }
 
         // Logical operations
@@ -2586,7 +2615,8 @@ bool TemplateSimplifier::simplifyCalculations(Token* frontToken, Token *backToke
         }
 
         if (validTokenEnd(bounded, tok, backToken, 2) &&
-            Token::Match(tok, "char|short|int|long { }")) {
+            (Token::Match(tok, "char|short|int|long { }") ||
+             Token::Match(tok, "char|short|int|long ( )"))) {
             tok->str("0"); // FIXME add type suffix
             tok->isSigned(false);
             tok->isUnsigned(false);
@@ -2907,10 +2937,28 @@ bool TemplateSimplifier::simplifyTemplateInstantiations(
     bool instantiated = false;
 
     for (const TokenAndName &instantiation : mTemplateInstantiations) {
+        // skip deleted instantiations
+        if (!instantiation.token())
+            continue;
         if (numberOfTemplateInstantiations != mTemplateInstantiations.size()) {
             numberOfTemplateInstantiations = mTemplateInstantiations.size();
             ++recursiveCount;
-            if (recursiveCount > 100) {
+            if (recursiveCount > mSettings->maxTemplateRecursion) {
+                std::list<std::string> typeStringsUsedInTemplateInstantiation;
+                const std::string typeForNewName = templateDeclaration.name() + "<" + getNewName(instantiation.token(), typeStringsUsedInTemplateInstantiation) + ">";
+
+                const std::list<const Token *> callstack(1, instantiation.token());
+                const ErrorMessage errmsg(callstack,
+                                          &mTokenizer->list,
+                                          Severity::information,
+                                          "templateRecursion",
+                                          "TemplateSimplifier: max template recursion ("
+                                          + MathLib::toString(mSettings->maxTemplateRecursion)
+                                          + ") reached for template '"+typeForNewName+"'. You might want to limit Cppcheck recursion.",
+                                          false);
+                if (mErrorLogger && mSettings->isEnabled(Settings::INFORMATION))
+                    mErrorLogger->reportErr(errmsg);
+
                 // bail out..
                 break;
             }
@@ -2977,8 +3025,8 @@ bool TemplateSimplifier::simplifyTemplateInstantiations(
             (!typeParametersInDeclaration.empty() && typeParametersInDeclaration.size() != mTypesUsedInTemplateInstantiation.size())) {
             if (printDebug && mErrorLogger) {
                 std::list<const Token *> callstack(1, tok2);
-                mErrorLogger->reportErr(ErrorLogger::ErrorMessage(callstack, &mTokenList, Severity::debug, "debug",
-                                        "Failed to instantiate template \"" + instantiation.name() + "\". The checking continues anyway.", false));
+                mErrorLogger->reportErr(ErrorMessage(callstack, &mTokenList, Severity::debug, "debug",
+                                                     "Failed to instantiate template \"" + instantiation.name() + "\". The checking continues anyway.", false));
             }
             if (typeForNewName.empty())
                 continue;
@@ -3045,8 +3093,8 @@ bool TemplateSimplifier::simplifyTemplateInstantiations(
         if (typeForNewName.empty()) {
             if (printDebug && mErrorLogger) {
                 std::list<const Token *> callstack(1, tok2);
-                mErrorLogger->reportErr(ErrorLogger::ErrorMessage(callstack, &mTokenList, Severity::debug, "debug",
-                                        "Failed to instantiate template \"" + templateDeclaration.name() + "\". The checking continues anyway.", false));
+                mErrorLogger->reportErr(ErrorMessage(callstack, &mTokenList, Severity::debug, "debug",
+                                                     "Failed to instantiate template \"" + templateDeclaration.name() + "\". The checking continues anyway.", false));
             }
             return false;
         }
@@ -3091,12 +3139,12 @@ void TemplateSimplifier::replaceTemplateUsage(
             Token::Match(nameTok, "template|const_cast|dynamic_cast|reinterpret_cast|static_cast"))
             continue;
 
-        std::set<TemplateSimplifier::TokenAndName*> & pointers = nameTok->templateSimplifierPointers();
+        std::set<TemplateSimplifier::TokenAndName*>* pointers = nameTok->templateSimplifierPointers();
 
         // check if instantiation matches token instantiation from pointer
-        if (pointers.size()) {
+        if (pointers && pointers->size()) {
             // check full name
-            if (instantiation.fullName() != (*pointers.begin())->fullName()) {
+            if (instantiation.fullName() != (*pointers->begin())->fullName()) {
                 // FIXME:  fallback to just matching name
                 if (nameTok->str() != instantiation.name())
                     continue;
@@ -3157,7 +3205,7 @@ void TemplateSimplifier::replaceTemplateUsage(
             nameTok->str(newName);
 
             for (Token *tok = nameTok1->next(); tok != tok2; tok = tok->next()) {
-                if (tok->isName() && !tok->templateSimplifierPointers().empty()) {
+                if (tok->isName() && tok->templateSimplifierPointers() && !tok->templateSimplifierPointers()->empty()) {
                     std::list<TokenAndName>::iterator ti;
                     for (ti = mTemplateInstantiations.begin(); ti != mTemplateInstantiations.end();) {
                         if (ti->token() == tok) {
@@ -3662,11 +3710,11 @@ void TemplateSimplifier::simplifyTemplates(
     if (passCount == passCountMax) {
         if (mSettings->debugwarnings) {
             const std::list<const Token*> locationList(1, mTokenList.front());
-            const ErrorLogger::ErrorMessage errmsg(locationList, &mTokenizer->list,
-                                                   Severity::debug,
-                                                   "debug",
-                                                   "TemplateSimplifier: pass count limit hit before simplifications were finished.",
-                                                   false);
+            const ErrorMessage errmsg(locationList, &mTokenizer->list,
+                                      Severity::debug,
+                                      "debug",
+                                      "TemplateSimplifier: pass count limit hit before simplifications were finished.",
+                                      false);
             if (mErrorLogger)
                 mErrorLogger->reportErr(errmsg);
         }

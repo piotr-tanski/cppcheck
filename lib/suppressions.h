@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2018 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,7 +24,6 @@
 
 #include <istream>
 #include <list>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -36,6 +35,7 @@ class CPPCHECKLIB Suppressions {
 public:
 
     struct CPPCHECKLIB ErrorMessage {
+        std::size_t hash;
         std::string errorId;
         void setFileName(const std::string &s);
         const std::string &getFileName() const {
@@ -49,17 +49,19 @@ public:
     };
 
     struct CPPCHECKLIB Suppression {
-        Suppression() : lineNumber(NO_LINE), matched(false) {}
+        Suppression() : lineNumber(NO_LINE), hash(0), thisAndNextLine(false), matched(false) {}
         Suppression(const Suppression &other) {
             *this = other;
         }
-        Suppression(const std::string &id, const std::string &file, int line=NO_LINE) : errorId(id), fileName(file), lineNumber(line), matched(false) {}
+        Suppression(const std::string &id, const std::string &file, int line=NO_LINE) : errorId(id), fileName(file), lineNumber(line), hash(0), thisAndNextLine(false), matched(false) {}
 
         Suppression & operator=(const Suppression &other) {
             errorId = other.errorId;
             fileName = other.fileName;
             lineNumber = other.lineNumber;
             symbolName = other.symbolName;
+            hash = other.hash;
+            thisAndNextLine = other.thisAndNextLine;
             matched = other.matched;
             return *this;
         }
@@ -73,6 +75,10 @@ public:
                 return fileName < other.fileName;
             if (symbolName != other.symbolName)
                 return symbolName < other.symbolName;
+            if (hash != other.hash)
+                return hash < other.hash;
+            if (thisAndNextLine != other.thisAndNextLine)
+                return thisAndNextLine;
             return false;
         }
 
@@ -97,6 +103,8 @@ public:
         std::string fileName;
         int lineNumber;
         std::string symbolName;
+        std::size_t hash;
+        bool thisAndNextLine; // Special case for backwards compatibility: { // cppcheck-suppress something
         bool matched;
 
         enum { NO_LINE = -1 };

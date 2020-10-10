@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -102,6 +102,9 @@ protected slots:
     *
     */
     void ok();
+
+    /** @brief Slot for validating input value in @c editPythonPath */
+    void validateEditPythonPath();
 
     /**
     * @brief Slot for adding a new application to the list

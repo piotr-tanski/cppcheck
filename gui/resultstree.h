@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
 #include <QStandardItem>
 #include <QSettings>
 #include <QContextMenuEvent>
-#include "errorlogger.h" // Severity
+#include "errortypes.h"
 #include "showtypes.h"
 
 class ApplicationList;
@@ -51,10 +51,6 @@ public:
     explicit ResultsTree(QWidget * parent = nullptr);
     virtual ~ResultsTree();
     void initialize(QSettings *settings, ApplicationList *list, ThreadHandler *checkThreadHandler);
-
-    void setTags(const QStringList &tags) {
-        mTags = tags;
-    }
 
     /**
     * @brief Add a new item to the tree
@@ -91,6 +87,12 @@ public:
     * @brief Function to show results that were previous hidden with HideResult()
     */
     void showHiddenResults();
+
+    /**
+    * @brief Refresh tree by checking which of the items should be shown
+    * and which should be hidden
+    */
+    void refreshTree();
 
     /**
     * @brief Save results to a text stream
@@ -200,14 +202,11 @@ signals:
     */
     void treeSelectionChanged(const QModelIndex &current);
 
-    /**
-     * Selected item(s) has been tagged
-     */
-    void tagged();
-
     /** Suppress Ids */
     void suppressIds(QStringList ids);
 
+    /** Edit contract for function */
+    void editFunctionContract(QString function);
 public slots:
 
     /**
@@ -277,10 +276,18 @@ protected slots:
     /** Slot for context menu item to suppress all messages with the current message id */
     void suppressSelectedIds();
 
+    /** Slot for context menu item to suppress message with hash */
+    void suppressHash();
+
     /**
     * @brief Slot for context menu item to open the folder containing the current file.
     */
     void openContainingFolder();
+
+    /**
+     * @brief Allow user to edit contract to fix bughunting warning
+     */
+    void editContract();
 
     /**
     * @brief Slot for selection change in the results tree.
@@ -320,7 +327,7 @@ protected:
     * @param report Report that errors are saved to
     * @param fileItem Item whose errors to save
     */
-    void saveErrors(Report *report, QStandardItem *fileItem) const;
+    void saveErrors(Report *report, const QStandardItem *fileItem) const;
 
     /**
     * @brief Convert a severity string to a icon filename
@@ -376,14 +383,6 @@ protected:
                                      const bool hide,
                                      const QString &icon,
                                      bool childOfMessage);
-
-
-    /**
-    * @brief Refresh tree by checking which of the items should be shown
-    * and which should be hidden
-    *
-    */
-    void refreshTree();
 
     /**
     * @brief Convert Severity to translated string for GUI.
@@ -523,8 +522,6 @@ private:
 
     /** @brief Convert GUI error item into data error item */
     void readErrorItem(const QStandardItem *error, ErrorItem *item) const;
-
-    QStringList mTags;
 
     QStringList mHiddenMessageId;
 

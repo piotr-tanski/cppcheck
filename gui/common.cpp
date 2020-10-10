@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2018 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -65,4 +65,18 @@ QString toFilterString(const QMap<QString,QString>& filters, bool addAllSupporte
     }
 
     return entries.join(";;");
+}
+
+QString getDataDir()
+{
+    QSettings settings;
+    const QString dataDir = settings.value("DATADIR", QString()).toString();
+    if (!dataDir.isEmpty())
+        return dataDir;
+    const QString appPath = QFileInfo(QCoreApplication::applicationFilePath()).canonicalPath();
+    if (QFileInfo(appPath + "/std.cfg").exists())
+        return appPath;
+    if (appPath.indexOf("/cppcheck/", 0, Qt::CaseInsensitive) > 0)
+        return appPath.left(appPath.indexOf("/cppcheck/", 0, Qt::CaseInsensitive) + 9);
+    return appPath;
 }

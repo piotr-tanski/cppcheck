@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2018 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -29,8 +29,8 @@ PathMatch::PathMatch(const std::vector<std::string> &excludedPaths, bool caseSen
     : mExcludedPaths(excludedPaths), mCaseSensitive(caseSensitive)
 {
     if (!mCaseSensitive)
-        for (std::vector<std::string>::iterator i = mExcludedPaths.begin(); i != mExcludedPaths.end(); ++i)
-            std::transform(i->begin(), i->end(), i->begin(), ::tolower);
+        for (std::string& excludedPath : mExcludedPaths)
+            std::transform(excludedPath.begin(), excludedPath.end(), excludedPath.begin(), ::tolower);
     mWorkingDirectory.push_back(Path::getCurrentPath());
 }
 

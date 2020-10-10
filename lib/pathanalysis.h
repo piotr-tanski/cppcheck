@@ -1,13 +1,11 @@
 #ifndef GUARD_PATHANALYSIS_H
 #define GUARD_PATHANALYSIS_H
 
+#include "errortypes.h"
+
 #include <functional>
 
-#include "errorlogger.h"
-#include "utils.h"
-
 class Library;
-class Settings;
 class Scope;
 class Token;
 

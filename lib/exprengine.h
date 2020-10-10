@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,14 +22,14 @@
 //---------------------------------------------------------------------------
 
 #include "config.h"
+#include "errortypes.h"
 
 #include <functional>
 #include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <vector>
-#include <stdint.h>
+#include <cstdint>
 
 class ErrorLogger;
 class Tokenizer;
@@ -72,12 +72,24 @@ namespace ExprEngine {
 
     class DataBase {
     public:
-        explicit DataBase(const Settings *settings) : settings(settings) {}
-        virtual std::string getNewSymbolName() = 0;
-        const Settings * const settings;
-        virtual void addError(int linenr) {
-            (void)linenr;
+        explicit DataBase(const std::string &currentFunction, const Settings *settings)
+            : currentFunction(currentFunction)
+            , settings(settings) {
         }
+        virtual std::string getNewSymbolName() = 0;
+        const std::string currentFunction;
+        const Settings * const settings;
+        virtual bool isC() const = 0;
+        virtual bool isCPP() const = 0;
+        virtual void reportError(const Token *tok,
+                                 Severity::SeverityType severity,
+                                 const char id[],
+                                 const std::string &text,
+                                 CWE cwe,
+                                 bool inconclusive,
+                                 bool incomplete=false,
+                                 const std::string &functionName = std::string()) = 0;
+        ErrorPath errorPath;
     };
 
     class Value {
@@ -131,7 +143,8 @@ namespace ExprEngine {
         IntRange(const std::string &name, int128_t minValue, int128_t maxValue)
             : Value(name, ValueType::IntRange)
             , minValue(minValue)
-            , maxValue(maxValue) {
+            , maxValue(maxValue)
+            , loopScope(nullptr) {
         }
         std::string getRange() const OVERRIDE {
             if (minValue == maxValue)
@@ -144,6 +157,7 @@ namespace ExprEngine {
 
         int128_t minValue;
         int128_t maxValue;
+        const Scope *loopScope;
     };
 
     class FloatRange : public Value {
@@ -180,10 +194,11 @@ namespace ExprEngine {
     // Array or pointer
     class ArrayValue: public Value {
     public:
-        const int MAXSIZE = 0x100000;
+        enum { MAXSIZE = 0x7fffffff };
 
         ArrayValue(const std::string &name, ValuePtr size, ValuePtr value, bool pointer, bool nullPointer, bool uninitPointer);
         ArrayValue(DataBase *data, const Variable *var);
+        ArrayValue(const std::string &name, const ArrayValue &arrayValue);
 
         std::string getRange() const OVERRIDE;
         std::string getSymbolicExpression() const OVERRIDE;
@@ -201,7 +216,7 @@ namespace ExprEngine {
             ValuePtr value;
         };
         std::vector<IndexAndValue> data;
-        ValuePtr size;
+        std::vector<ValuePtr> size;
     };
 
     class StringLiteralValue: public Value {
@@ -224,10 +239,19 @@ namespace ExprEngine {
 
         std::string getSymbolicExpression() const OVERRIDE;
 
-        ValuePtr getValueOfMember(const std::string &name) const {
-            auto it = member.find(name);
+        ValuePtr getValueOfMember(const std::string &n) const {
+            auto it = member.find(n);
             return (it == member.end()) ? ValuePtr() : it->second;
         }
+
+        std::string getUninitStructMember() const {
+            for (auto memberNameValue: member) {
+                if (memberNameValue.second && memberNameValue.second->isUninit())
+                    return memberNameValue.first;
+            }
+            return std::string();
+        }
+
         std::map<std::string, ValuePtr> member;
     };
 
@@ -293,19 +317,19 @@ namespace ExprEngine {
         bool isEqual(DataBase * /*dataBase*/, int /*value*/) const OVERRIDE {
             return true;
         }
-        /* FIXME: This is too noisy
         bool isUninit() const OVERRIDE {
             return true;
         }
-        */
     };
 
     typedef std::function<void(const Token *, const ExprEngine::Value &, ExprEngine::DataBase *)> Callback;
 
     /** Execute all functions */
-    void CPPCHECKLIB executeAllFunctions(const Tokenizer *tokenizer, const Settings *settings, const std::vector<Callback> &callbacks, std::ostream &report);
-    void executeFunction(const Scope *functionScope, const Tokenizer *tokenizer, const Settings *settings, const std::vector<Callback> &callbacks, std::ostream &report);
+    void CPPCHECKLIB executeAllFunctions(ErrorLogger *errorLogger, const Tokenizer *tokenizer, const Settings *settings, const std::vector<Callback> &callbacks, std::ostream &report);
+    void executeFunction(const Scope *functionScope, ErrorLogger *errorLogger, const Tokenizer *tokenizer, const Settings *settings, const std::vector<Callback> &callbacks, std::ostream &report);
 
     void runChecks(ErrorLogger *errorLogger, const Tokenizer *tokenizer, const Settings *settings);
+
+    void dump(ExprEngine::ValuePtr val);
 }
 #endif // exprengineH

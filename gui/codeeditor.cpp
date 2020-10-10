@@ -1,6 +1,7 @@
 #include <QtWidgets>
 #include <QShortcut>
 #include "codeeditor.h"
+#include "codeeditorstyle.h"
 
 
 Highlighter::Highlighter(QTextDocument *parent,
@@ -248,6 +249,19 @@ void CodeEditor::setError(const QString &code, int errorLine, const QStringList 
     setPlainText(code);
 
     mErrorPosition = getPos(code, errorLine);
+    QTextCursor tc = textCursor();
+    tc.setPosition(mErrorPosition);
+    setTextCursor(tc);
+    centerCursor();
+
+    highlightErrorLine();
+}
+
+void CodeEditor::setError(int errorLine, const QStringList &symbols)
+{
+    mHighlighter->setSymbols(symbols);
+
+    mErrorPosition = getPos(toPlainText(), errorLine);
     QTextCursor tc = textCursor();
     tc.setPosition(mErrorPosition);
     setTextCursor(tc);

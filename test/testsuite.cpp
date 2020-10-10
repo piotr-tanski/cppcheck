@@ -1,6 +1,6 @@
 /*
  * Cppcheck - A tool for static C/C++ code analysis
- * Copyright (C) 2007-2019 Cppcheck team.
+ * Copyright (C) 2007-2020 Cppcheck team.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -360,7 +360,7 @@ void TestFixture::reportOut(const std::string & outmsg)
     output << outmsg << std::endl;
 }
 
-void TestFixture::reportErr(const ErrorLogger::ErrorMessage &msg)
+void TestFixture::reportErr(const ErrorMessage &msg)
 {
     const std::string errormessage(msg.toString(mVerbose, mTemplateFormat, mTemplateLocation));
     if (errout.str().find(errormessage) == std::string::npos)
