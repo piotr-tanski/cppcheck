@@ -6,6 +6,7 @@
 #include "token.h"
 #include "tokenize.h"
 
+#include <algorithm>
 #include <list>
 
 // Register this check class (by creating a static instance of it)
@@ -34,7 +35,7 @@ void CheckSharedPtrPassedByRef::sharedPtrByRef()
         {
             // Check whether argument's type name matches expected types names of shared_ptr.
             auto it = std::find_if(m_sharedPtrTypesNames.begin(), m_sharedPtrTypesNames.end(),
-                [&argument](const auto& name) {
+                [&argument](const std::string& name) {
                     return argument.getTypeName() == name;
             });
             if (it != m_sharedPtrTypesNames.end())
