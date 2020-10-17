@@ -33,13 +33,16 @@ void CheckInvocableAsFunctionArgument::invocableAsFunctionArg()
     for (const auto scope : symbolDb->functionScopes)
     {
         // Iterate over function's body.
-        for (auto it = scope->bodyStart->next(); it != scope->bodyEnd; it = it->next())
+        for (auto it = scope->bodyStart; it != scope->bodyEnd; it = it->next())
         {
             // Check for a pattern of a function/method/constructor call.
             if (!Token::Match(it, "%name% (|{"))
                 continue;
 
-            findInvocablesOnArgList(it, it->tokAt(2));
+            const auto func = it->function();
+            if (func != nullptr && func->isVariadic()) {
+                findInvocablesOnArgList(it, it->tokAt((func->argCount() - 1) + 2));
+            }
         }
     }
 
@@ -50,14 +53,14 @@ void CheckInvocableAsFunctionArgument::invocableAsFunctionArg()
             || scope.type == Scope::eGlobal
             || scope.type == Scope::eNamespace)
         {
-            for (const auto& var : scope.varlist)
+            for (auto tok = scope.bodyStart; tok != scope.bodyEnd; tok = tok->next())
             {
-                if (var.isInit()) {
-                    const auto tok = var.nameToken();
-                    if (!Token::Match(tok, "%name% (|{"))
-                        continue;
+                if (!Token::Match(tok, "%name% (|{"))
+                    continue;
 
-                    findInvocablesOnArgList(tok, tok->tokAt(2));
+                const auto func = tok->function();
+                if (func != nullptr && func->isVariadic()) {
+                    findInvocablesOnArgList(tok, tok->tokAt((func->argCount() - 1) + 2));
                 }
             }
         }
@@ -85,5 +88,5 @@ void CheckInvocableAsFunctionArgument::getErrorMessages(ErrorLogger *errorLogger
 void CheckInvocableAsFunctionArgument::errorInvocableAsFunctionArg(const Token *argTok, const std::string &functionName)
 {
     reportError(argTok, Severity::warning, name(),
-                "Invocable \"" + argTok->str() + "\" shall not be an argument to \"" + functionName + "\" function/method/constructor. Only literals or variables are allowed.");
+                "Invocable \"" + argTok->str() + "\" shall not be an argument to variadic part of \"" + functionName + "\" function. Only literals or variables are allowed.");
 }

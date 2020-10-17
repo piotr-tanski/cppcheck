@@ -18,7 +18,7 @@ private:
         settings.addEnabled("warning");
 
         TEST_CASE(functionCall);
-        TEST_CASE(constructorCall);
+        TEST_CASE(globalCall);
         TEST_CASE(methodCall);
     }
 
@@ -55,8 +55,7 @@ private:
                     func(f1(), 1);
                     return 0;
                 })");
-        ASSERT_EQUALS("[test.cpp:8]: (warning) Invocable \"f1\" shall not be an argument to \"func\" function/method/constructor. Only literals or variables are allowed.\n",
-                      errout.str());
+        ASSERT_EQUALS("",errout.str());
 
         check(R"(
             class X { };
@@ -67,7 +66,7 @@ private:
                 return 0;
             }
 
-            void func(const X& x, int a, int b, int c) {}
+            void func(const X& x, ...) {}
 
             int main() {
                 func(X{}, 0, 1, 2);
@@ -81,48 +80,30 @@ private:
                 return 0;
             }
         )");
-        ASSERT_EQUALS("[test.cpp:14]: (warning) Invocable \"f1\" shall not be an argument to \"func\" function/method/constructor. Only literals or variables are allowed.\n"
-                      "[test.cpp:15]: (warning) Invocable \"f2\" shall not be an argument to \"func\" function/method/constructor. Only literals or variables are allowed.\n"
-                      "[test.cpp:15]: (warning) Invocable \"f2\" shall not be an argument to \"X\" function/method/constructor. Only literals or variables are allowed.\n"
-                      "[test.cpp:16]: (warning) Invocable \"f1\" shall not be an argument to \"func\" function/method/constructor. Only literals or variables are allowed.\n"
-                      "[test.cpp:16]: (warning) Invocable \"f2\" shall not be an argument to \"func\" function/method/constructor. Only literals or variables are allowed.\n",
+        ASSERT_EQUALS("[test.cpp:15]: (warning) Invocable \"f2\" shall not be an argument to variadic part of \"func\" function. Only literals or variables are allowed.\n"
+                      "[test.cpp:16]: (warning) Invocable \"f2\" shall not be an argument to variadic part of \"func\" function. Only literals or variables are allowed.\n",
                       errout.str());
     }
 
-    void constructorCall()
+    void globalCall()
     {
         check(R"(
-            int getInteger() {
+            int getInteger(...) {
                 return 0;
             }
-
-            class X {
-                int x;
-                int y{getInteger()};
-                public:
-                    X(int _x) : x{_x} {}
-            };
 
             namespace SomeNamespace
             {
-                static X globalX1{0};
-                static X globalX2{getInteger()};
+                static int globalX3 = getInteger(0);
+                static int globalX4 = getInteger(0, getInteger());
             }
 
             int main() {
-                int v = getInteger();
-                X x1{0};
-                X x2{getInteger()};
-                X x3{v};
-                X x5 = X{0};
-                X x4 = X{getInteger()};
                 return 0;
             }
         )");
-        ASSERT_EQUALS("[test.cpp:22]: (warning) Invocable \"getInteger\" shall not be an argument to \"x2\" function/method/constructor. Only literals or variables are allowed.\n"
-                      "[test.cpp:25]: (warning) Invocable \"getInteger\" shall not be an argument to \"X\" function/method/constructor. Only literals or variables are allowed.\n"
-                      "[test.cpp:8]: (warning) Invocable \"getInteger\" shall not be an argument to \"y\" function/method/constructor. Only literals or variables are allowed.\n"
-                      "[test.cpp:16]: (warning) Invocable \"getInteger\" shall not be an argument to \"globalX2\" function/method/constructor. Only literals or variables are allowed.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:9]: (warning) Invocable \"getInteger\" shall not be an argument to variadic part of \"getInteger\" function. Only literals or variables are allowed.\n",
+                      errout.str());
     }
 
     void methodCall()
@@ -131,7 +112,7 @@ private:
             class X {
                 int x{0};
                 public:
-                    void setX(int value) { x = value; }
+                    void setX(int value, ...) { x = value; }
             };
 
             int getInteger() {
@@ -142,12 +123,12 @@ private:
                 X x;
                 int v = getInteger();
                 x.setX(0);
-                x.setX(getInteger());
-                x.setX(v);
+                x.setX(1, getInteger());
+                x.setX(2, v);
                 return 0;
             }
         )");
-        ASSERT_EQUALS("[test.cpp:16]: (warning) Invocable \"getInteger\" shall not be an argument to \"setX\" function/method/constructor. Only literals or variables are allowed.\n",
+        ASSERT_EQUALS("[test.cpp:16]: (warning) Invocable \"getInteger\" shall not be an argument to variadic part of \"setX\" function. Only literals or variables are allowed.\n",
                       errout.str());
     }
 };
