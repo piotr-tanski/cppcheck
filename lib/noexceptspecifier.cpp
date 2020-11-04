@@ -27,6 +27,7 @@ void CheckExceptionSpecifier::runChecks(const Tokenizer *tokenizer,
     check.noexceptSpecialMemberFunctions();
     check.noexceptGetters();
     check.noexceptFunctionsReturningLiterals();
+    check.noexceptFunctionsNotCallingThrowingFunctions();
 }
 
 void CheckExceptionSpecifier::noexceptSpecialMemberFunctions()
@@ -81,6 +82,24 @@ void CheckExceptionSpecifier::noexceptFunctionsReturningLiterals()
         const auto function = scope->function;
         if (function != nullptr && isFunctionReturningLiteral(function)) {
             if (!function->isNoExcept()) {
+                noexceptErrorMessage(function->token);
+            }
+        }
+    }
+}
+
+void CheckExceptionSpecifier::noexceptFunctionsNotCallingThrowingFunctions()
+{
+    const auto symbolDb = mTokenizer->getSymbolDatabase();
+
+    // Iterate over all functions
+    for (const auto scope : symbolDb->functionScopes) {
+        const auto function = scope->function;
+        if (function != nullptr) {
+            if (!function->isNoExcept()
+                && doesntThrow(*function)
+                && doesntThrowFromNestedFunctions(*function))
+            {
                 noexceptErrorMessage(function->token);
             }
         }
@@ -143,6 +162,12 @@ bool CheckExceptionSpecifier::returnsConstPointer(const Function &function) cons
         return true;
     }
     return false;
+}
+
+bool CheckExceptionSpecifier::returnsConstCharPointer(const Function& function) const noexcept
+{
+    const auto defStart = function.retDef;
+    return Token::Match(defStart, "const char|wchar_t *");
 }
 
 bool CheckExceptionSpecifier::returnsIntegralType(const Function &function) const noexcept
@@ -232,6 +257,120 @@ bool CheckExceptionSpecifier::isFunctionReturningLiteral(const Function *functio
     return returnsIntegralType(*function)
             && function->hasBody()
             && returnsLiteral(*function);
+}
+
+bool CheckExceptionSpecifier::doesntThrow(const Function &function) const noexcept
+{
+    std::vector<Scope *> catchAllScopes = findCatchAllScopes(function);
+
+    const auto scope = function.functionScope;
+    for (auto tok = scope->bodyStart; tok != scope->bodyEnd; tok = tok->next()) {
+        if (tok->isKeyword() && tok->str() == "throw" && !isNestedInCatchAll(tok, catchAllScopes)) {
+            return false;
+        }
+    }
+    // throw doesn't occur.
+    return true;
+}
+
+std::vector<Scope *> CheckExceptionSpecifier::findCatchAllScopes(const Function &function) const noexcept
+{
+    const auto funcScope = function.functionScope;
+
+    std::vector<Scope *> scopes;
+    for (const auto nestedScope : funcScope->nestedList) {
+        if (nestedScope->type == Scope::ScopeType::eTry
+            && Token::Match(nestedScope->bodyEnd->tokAt(1), "catch ( ... )")) {
+            scopes.push_back(nestedScope);
+        }
+    }
+    return scopes;
+}
+
+bool CheckExceptionSpecifier::isNestedInCatchAll(const Token *token,
+                                                 const std::vector<Scope *> catchAllScopes) const noexcept
+{
+    for (const auto scope : catchAllScopes) {
+        if (token->scope()->isNestedIn(scope)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool CheckExceptionSpecifier::doesntThrowFromNestedFunctions(const Function &function) const noexcept
+{
+    std::vector<Scope *> catchAllScopes = findCatchAllScopes(function);
+    const auto scope = function.functionScope;
+
+    for (auto tok = scope->bodyStart; tok != scope->bodyEnd; tok = tok->next()) {
+        if (Token::Match(tok, "%var%")) {
+            const auto variable = tok->variable();
+            if (variable != nullptr
+                && variable->isClass()
+                && variable->isLocal()) {
+                // Local class' constructors may throw.
+                // Additional analysis would be needed to exclude a few cases.
+                return false;
+            }
+        }
+
+        if (Token::Match(tok, "%name% (|{") && !tok->isKeyword()) {
+            std::cout << __LINE__ << std::endl;
+            const auto calledFunc = tok->function();
+            if (calledFunc != nullptr && !isSpecialMemberFunction(*calledFunc)) {
+                std::cout << __LINE__ << std::endl;
+                if (!calledFunc->isNoExcept()
+                    && !isNestedInCatchAll(tok, catchAllScopes)) {
+                    std::cout << __LINE__ << std::endl;
+                    // A function called is not noexcept and is not nested in try-catch-all scope.
+                    return false;
+                }
+            }
+        }
+
+        if (Token::Match(tok, "%type% (|{")) {
+            const auto type = tok->type();
+            if (type != nullptr) {
+                if (type->isClassType() || type->isStructType() || type->isUnionType()) {
+                    // Unnamed variable instantiated.
+                    return false;
+                }
+            }
+        }
+
+        if (Token::Match(tok, "return %str%") && !returnsConstCharPointer(function)) {
+            // Returns string but not via const char*.
+            return false;
+        }
+
+        if (Token::Match(tok, "new")) {
+            // Allocates memory.
+            return false;
+        }
+    }
+
+    // No classes' constructors called.
+    // No throwing functions called.
+    return returnsVoid(function) || isNoexceptReturnType(function);
+}
+
+bool CheckExceptionSpecifier::returnsVoid(const Function &function) const noexcept
+{
+    if (function.retDef == function.returnDefEnd()->tokAt(-1)) {
+        if (Token::Match(function.retDef, "void")) {
+            return true;
+        }
+    }
+    return false;
+
+}
+
+bool CheckExceptionSpecifier::isSpecialMemberFunction(const Function &function) const noexcept
+{
+    return function.isConstructor()
+            || isDestructor(function)
+            || function.type == Function::eOperatorEqual;
 }
 
 void CheckExceptionSpecifier::getErrorMessages(ErrorLogger *errorLogger,

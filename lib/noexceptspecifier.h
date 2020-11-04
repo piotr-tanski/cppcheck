@@ -4,6 +4,8 @@
 #include "check.h"
 #include "config.h"
 
+#include <vector>
+
 class ErrorLogger;
 class Function;
 class Scope;
@@ -21,6 +23,7 @@ public:
     void noexceptSpecialMemberFunctions();
     void noexceptGetters();
     void noexceptFunctionsReturningLiterals();
+    void noexceptFunctionsNotCallingThrowingFunctions();
 
 private:
     bool isDestructor(const Function& function) const noexcept;
@@ -31,11 +34,21 @@ private:
     bool isNoexceptReturnType(const Function& function) const noexcept;
     bool returnsConstReference(const Function& function) const noexcept;
     bool returnsConstPointer(const Function& function) const noexcept;
+    bool returnsConstCharPointer(const Function& function) const noexcept;
     bool returnsIntegralType(const Function& function) const noexcept;
     bool returnsMember(const Function& function, const Scope *classScope) const noexcept;
     bool returnsLiteral(const Function& function) const noexcept;
+    bool returnsVoid(const Function& function) const noexcept;
+    bool returnsPointer(const Function& function) const noexcept;
+    bool returnsReference(const Function& function) const noexcept;
 
     bool isFunctionReturningLiteral(const Function* function) const noexcept;
+
+    bool doesntThrow(const Function& function) const noexcept;
+    bool doesntThrowFromNestedFunctions(const Function& function) const noexcept;
+    std::vector<Scope*> findCatchAllScopes(const Function& function) const noexcept;
+    bool isNestedInCatchAll(const Token *token, const std::vector<Scope*> catchAllScopes) const noexcept;
+    bool isSpecialMemberFunction(const Function& function) const noexcept;
 
     void getErrorMessages(ErrorLogger *errorLogger, const Settings *settings) const OVERRIDE;
     void noexceptErrorMessage(const Token* token);
